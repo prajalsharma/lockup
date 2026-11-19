@@ -1008,7 +1008,8 @@
         {
           "name": "bid_mint",
           "docs": [
-            "Its mint authority must already be the yard PDA so the faucet works."
+            "The bid currency. Any SPL mint works (the live yard uses Circle's devnet USDC). The",
+            "`faucet` instruction only works for a mint whose authority is the yard PDA."
           ]
         },
         {
@@ -2003,6 +2004,13 @@
           }
         },
         {
+          "name": "treasury",
+          "docs": [
+            "Where winning bids are paid. Must belong to the yard's operator."
+          ],
+          "writable": true
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
@@ -2492,7 +2500,7 @@
           {
             "name": "value",
             "docs": [
-              "Appraised value in whole test dollars."
+              "Appraised value in cents of the bid currency."
             ],
             "type": "u32"
           },

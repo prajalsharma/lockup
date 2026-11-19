@@ -30,8 +30,14 @@ async function main() {
   saved.items ??= [];
 
   if (!(await connection.getAccountInfo(p.yard))) {
-    const bidMint = await createMint(connection, authority, authority.publicKey, null, 6);
-    await setAuthority(connection, authority, bidMint, authority, AuthorityType.MintTokens, p.yard);
+    // BID_MINT picks an existing currency (Circle devnet USDC). Without it, a test mint with a faucet is made.
+    let bidMint: PublicKey;
+    if (process.env.BID_MINT) {
+      bidMint = new PublicKey(process.env.BID_MINT);
+    } else {
+      bidMint = await createMint(connection, authority, authority.publicKey, null, 6);
+      await setAuthority(connection, authority, bidMint, authority, AuthorityType.MintTokens, p.yard);
+    }
     saved.bidMint = bidMint.toBase58();
     save();
     const sig = await program.methods.initYard(new BN(YARD_ID.toString()))

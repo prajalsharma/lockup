@@ -31,7 +31,7 @@ export async function GET(req: Request) {
       const info = t.account.data.parsed.info;
       held.set(info.mint, (held.get(info.mint) ?? 0) + Number(info.tokenAmount.amount));
     }
-    const items = ITEMS.map((it) => ({ name: it.name, id: it.id, rarity: it.rarity, qty: held.get(it.mint) ?? 0, value: it.value * (held.get(it.mint) ?? 0), mint: it.mint })).filter((i) => i.qty > 0);
+    const items = ITEMS.map((it) => ({ name: it.name, id: it.id, rarity: it.rarity, qty: held.get(it.mint) ?? 0, value: (it.value * (held.get(it.mint) ?? 0)) / 100, mint: it.mint })).filter((i) => i.qty > 0);
 
     const decoded = records.map((r) => coder.decode("Bidder", r.account.data));
     const unitKeys: PublicKey[] = decoded.map((d) => d.unit);
@@ -45,13 +45,13 @@ export async function GET(req: Request) {
       const status = Object.keys(u.status)[0].toLowerCase() as HaulRound["status"];
       const closed = status === "closed";
       const slot = u.slots.find((s: any) => s.bidder.equals(owner));
-      const lots: DoorLot[] = closed ? u.lots.map((l: any) => ({ name: ITEMS[l.item].name, id: ITEMS[l.item].id, rarity: ITEMS[l.item].rarity, heavy: ITEMS[l.item].heavy, qty: l.qty, value: ITEMS[l.item].value * l.qty })) : [];
+      const lots: DoorLot[] = closed ? u.lots.map((l: any) => ({ name: ITEMS[l.item].name, id: ITEMS[l.item].id, rarity: ITEMS[l.item].rarity, heavy: ITEMS[l.item].heavy, qty: l.qty, value: (ITEMS[l.item].value * l.qty) / 100 })) : [];
       rounds.push({
         unit: Number(u.unit_id), address: unitKeys[i].toBase58(), status,
         deposit: Number(d.deposit) / 1e6,
         bid: closed && slot?.has_bid ? Number(slot.bid) / 1e6 : null,
         won: closed && u.winner.equals(owner), settled: d.settled,
-        winningBid: Number(u.winning_bid) / 1e6, value: u.value, lots,
+        winningBid: Number(u.winning_bid) / 1e6, value: u.value / 100, lots,
       });
     });
     rounds.sort((a, b) => b.unit - a.unit);

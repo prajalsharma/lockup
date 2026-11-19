@@ -7,7 +7,7 @@ import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
 import { useSignMessage, useSignTransaction, useWallets } from "@privy-io/react-auth/solana";
 import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
 import { useMemo } from "react";
-import { EmailWalletCtx, PRIVY_APP_ID, type EmailWallet } from "./email-wallet";
+import { EmailWalletCtx, PRIVY_APP_ID, PRIVY_GOOGLE, type EmailWallet } from "./email-wallet";
 import { RPC } from "./shared";
 
 function Bridge({ children }: { children: React.ReactNode }) {
@@ -48,7 +48,7 @@ export default function PrivyBridge({ children }: { children: React.ReactNode })
     <PrivyProvider
       appId={PRIVY_APP_ID}
       config={{
-        loginMethods: ["email", "google"],
+        loginMethods: PRIVY_GOOGLE ? ["email", "google"] : ["email"],
         appearance: { theme: "dark", accentColor: "#ffb01f", walletChainType: "solana-only" },
         embeddedWallets: { solana: { createOnLogin: "users-without-wallets" }, showWalletUIs: false },
         solana: { rpcs },

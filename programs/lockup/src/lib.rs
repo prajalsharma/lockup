@@ -585,10 +585,27 @@ pub mod lockup {
             record.deposit
         };
 
+        let id = ctx.accounts.yard.yard_id.to_le_bytes();
+        let bump = [ctx.accounts.yard.bump];
+        let seeds: &[&[u8]] = &[YARD_SEED, &id, &bump];
+        if won && unit.winning_bid > 0 {
+            // The winning bid is the price of the unit. It leaves the vault for the operator's
+            // treasury here, in the same instruction that returns the winner's change, so the
+            // vault only ever holds deposits that are still owed to someone.
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.key(),
+                    SplTransfer {
+                        from: ctx.accounts.vault.to_account_info(),
+                        to: ctx.accounts.treasury.to_account_info(),
+                        authority: ctx.accounts.yard.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                unit.winning_bid,
+            )?;
+        }
         if payout > 0 {
-            let id = ctx.accounts.yard.yard_id.to_le_bytes();
-            let bump = [ctx.accounts.yard.bump];
-            let seeds: &[&[u8]] = &[YARD_SEED, &id, &bump];
             token::transfer(
                 CpiContext::new_with_signer(
                     ctx.accounts.token_program.key(),
@@ -687,8 +704,8 @@ pub struct InitYard<'info> {
     pub authority: Signer<'info>,
     #[account(init, payer = authority, space = 8 + Yard::INIT_SPACE, seeds = [YARD_SEED, &yard_id.to_le_bytes()], bump)]
     pub yard: Box<Account<'info, Yard>>,
-    /// Its mint authority must already be the yard PDA so the faucet works.
-    #[account(constraint = bid_mint.mint_authority == anchor_lang::solana_program::program_option::COption::Some(yard.key()) @ LockupError::MintMismatch)]
+    /// The bid currency. Any SPL mint works (the live yard uses Circle's devnet USDC). The
+    /// `faucet` instruction only works for a mint whose authority is the yard PDA.
     pub bid_mint: Box<Account<'info, Mint>>,
     #[account(init, payer = authority, token::mint = bid_mint, token::authority = yard, seeds = [VAULT_SEED, yard.key().as_ref()], bump)]
     pub vault: Box<Account<'info, TokenAccount>>,
@@ -912,6 +929,9 @@ pub struct SettleBidder<'info> {
     pub bidder_token_account: Box<Account<'info, TokenAccount>>,
     #[account(mut, seeds = [VAULT_SEED, yard.key().as_ref()], bump, constraint = vault.key() == yard.vault @ LockupError::InvalidAccount)]
     pub vault: Box<Account<'info, TokenAccount>>,
+    /// Where winning bids are paid. Must belong to the yard's operator.
+    #[account(mut, constraint = treasury.owner == yard.authority @ LockupError::Unauthorized, constraint = treasury.mint == yard.bid_mint @ LockupError::MintMismatch)]
+    pub treasury: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
 }
 

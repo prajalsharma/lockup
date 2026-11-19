@@ -14,7 +14,8 @@ Pins: `anchor-lang 1.0.2`, `ephemeral-rollups-sdk 0.16.2` (features `anchor`, `a
 6. **Bid.** `place_bid` + `seal_bid` create a bid only its bidder can read.
 7. **Close.** After the clock, `close_unit` reads every bid, picks the highest (ties go to the earlier
    bid) and writes bids, winner, contents and salt into the unit. `commit_unit` returns it to Solana.
-8. **Settle.** `settle_bidder` pays the winner `deposit − bid` and everyone else their full deposit.
+8. **Settle.** `settle_bidder` pays the winner `deposit − bid`, sends the winning bid to the operator's
+   treasury, and pays everyone else their full deposit.
    `claim_lot` moves each lot from the warehouse to the winner. Both are permissionless.
 9. **Stall.** `reclaim_stalled` returns a deposit an hour after joining if the unit has no result on Solana.
 
@@ -22,7 +23,7 @@ Pins: `anchor-lang 1.0.2`, `ephemeral-rollups-sdk 0.16.2` (features `anchor`, `a
 
 | Account | Lives on | Who can read it | Holds |
 |---|---|---|---|
-| `Yard` | Solana | anyone | authority, test-dollar mint, vault, item catalog |
+| `Yard` | Solana | anyone | authority, bid mint (Circle devnet USDC on the live yard), vault, item catalog (values in cents) |
 | warehouse token accounts | Solana | anyone | pooled items for every unit, so balances don't reveal one unit's contents |
 | `Unit` | Solana; on the rollup while bidding | anyone | clock, clues, who is in line, then bids, winner, contents, salt |
 | `Bidder` | Solana | anyone | one wallet's deposit for one unit |
@@ -45,4 +46,4 @@ reads and exact settlement amounts. The hosted site has also been played end to 
 quick wallet. Wallet extensions connect through Solana Wallet Adapter. That path has been played end to end on the
 hosted site with an injected wallet implementing the Wallet Standard interface (connect, signTransaction,
 signMessage); a real Phantom, Solflare or Backpack install has not been driven. Email sign-in through
-Privy is wired but has not been run, because it needs an App ID.
+Privy is live; its login window opens, but a full email login has not been driven by a test.

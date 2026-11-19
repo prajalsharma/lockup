@@ -16,10 +16,10 @@ const TODAY = [
   "Two house bidders join every unit so there is always someone to beat. They are run by us and bid from the three public clues only. That rule is in our code, not enforced by the chain.",
   "Each unit's operator knows a secret salt, so the operator can work out the contents early. The operator can't choose them: the random draw arrives after the salt is locked in, and the salt is published when the unit closes.",
   "Rounds move only while someone has the site open. The keeper that locks, opens and settles units is driven by visits to the yard.",
-  "Test dollars are the yard's own token on devnet, with an open faucet. They are not Circle's USDC.",
+  "Stakes are small on purpose. The yard runs on about 20 devnet USDC, and new wallets are sent 1 USDC to start. More comes from Circle's faucet.",
 ];
 const ON_CHAIN = [
-  "It is devnet only. Items and dollars are test tokens with no real value.",
+  "It is devnet only. Bids are in Circle's devnet USDC and items are test tokens. None of it has real value.",
   "Your deposit is public, so people can see the most you could have bid. They can't see the bid.",
   "Sealed bids depend on MagicBlock's private rollup. You are trusting Intel's TDX hardware and MagicBlock's validator.",
   "The operator has to close each round. If that never happens, bidders can take their deposits back an hour after joining and the unit stays shut.",
@@ -103,7 +103,7 @@ export default function Home() {
           <div className="mb-12 grid gap-6 lg:grid-cols-[1fr_1fr] lg:items-end">
             <h2 className="display reveal text-[clamp(48px,7vw,112px)]">Pick a door</h2>
             <p className="reveal max-w-[520px] text-[17px] text-ink-2 lg:justify-self-end">
-              These are the units on Solana devnet right now. Connect any Solana wallet, claim 500 test dollars and line up. A round takes about two minutes.
+              These are the units on Solana devnet right now. Connect a wallet and line up. Bids are in Circle's devnet USDC, and new wallets are sent 1 USDC to start. A round takes about two minutes.
             </p>
           </div>
           <LiveCorridor />

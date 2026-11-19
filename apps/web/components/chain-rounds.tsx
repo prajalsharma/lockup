@@ -9,7 +9,7 @@ export function clueText(c: { kind: number; arg: number }) {
   switch (c.kind) {
     case 0: return `${c.arg} items inside`;
     case 1: return GROUPS[c.arg] ?? "Something unusual inside";
-    case 2: return `Worth at least $${c.arg}`;
+    case 2: return `Worth at least ${usd(c.arg / 100)}`;
     case 3: return c.arg ? "One item is a grail" : "No grail in this one";
     default: return c.arg ? `${c.arg} heavy ${c.arg === 1 ? "item" : "items"} at the back` : "Nothing heavy inside";
   }

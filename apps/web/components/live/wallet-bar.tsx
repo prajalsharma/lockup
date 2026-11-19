@@ -21,9 +21,10 @@ export function WalletBar() {
         <p className="label text-ink-3">{p.walletName}</p>
         <a className="ulink num mt-1 inline-block" href={explorer(p.address)} target="_blank" rel="noreferrer">{short(p.address)}</a>
       </div>
-      <div><p className="label text-ink-3">Test dollars</p><p className="num mt-1">{p.dollars === null ? "reading devnet" : usd(p.dollars)}</p></div>
+      <div><p className="label text-ink-3">Devnet USDC</p><p className="num mt-1">{p.dollars === null ? "reading devnet" : usd(p.dollars)}</p></div>
       <div><p className="label text-ink-3">Devnet SOL</p><p className="num mt-1">{p.sol === null ? "reading devnet" : p.sol.toFixed(3)}</p></div>
-      <button type="button" className="btn btn-ghost btn-sm" disabled={!!p.busy} onClick={() => void p.topUp()}>Get 500 test dollars</button>
+      {p.dollars === 0 && <button type="button" className="btn btn-ghost btn-sm" disabled={!!p.busy} onClick={() => void p.topUp()}>Get starter USDC</button>}
+      <a className="ulink ulink-on text-sm text-ink-2" href="https://faucet.circle.com" target="_blank" rel="noreferrer">More from Circle's faucet</a>
     </div>
   );
 }

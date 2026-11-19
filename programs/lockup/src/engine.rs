@@ -19,7 +19,7 @@ pub const CLUE_HEAVY: u8 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ItemInfo {
-    /// Appraised value in whole test dollars.
+    /// Appraised value in cents of the bid currency.
     pub value: u32,
     pub weight: u16,
     pub rarity: u8,
@@ -133,7 +133,7 @@ pub fn stock(seed: &[u8; 32], catalog: &[ItemInfo]) -> Result<Stocked, EngineErr
     for g in groups {
         pool.push(EngineClue { kind: CLUE_GROUP, arg: g as u32 });
     }
-    // A floor between 35% and 60% of the true value, rounded down to $5, never below $5.
+    // A floor between 35% and 60% of the true value, rounded down to 5 cents, never below 5.
     let pct = 35 + rng.below(26) as u32;
     let floor = ((value * pct / 100) / 5 * 5).max(5);
     pool.push(EngineClue { kind: CLUE_FLOOR, arg: floor });

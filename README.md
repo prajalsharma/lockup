@@ -10,8 +10,9 @@ MagicBlock's private rollup, and the highest bid rolls the door up.
 - **How it works and what is trusted:** [`docs/CONTRACTS.md`](docs/CONTRACTS.md)
 
 Everything on the site is read from or written to Solana devnet. There is no simulated mode: units, deposits,
-bids, results and the items in "My haul" are all on-chain accounts and SPL token balances. The bid currency
-is the yard's own devnet token with an open faucet.
+bids, results and the items in "My haul" are all on-chain accounts and SPL token balances. Bids are in
+Circle's devnet USDC (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`); stakes are cents because the yard
+runs on a small float, and each new wallet is sent 1 USDC to start.
 
 ## MagicBlock features used
 

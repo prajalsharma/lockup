@@ -18,7 +18,7 @@ export function Hero() {
         <div className="flex flex-col justify-end px-5 pb-10 pt-10 md:px-10 lg:pb-14 lg:pt-28 lg:pl-[max(40px,calc((100vw-1320px)/2+40px))]">
           <p className="rise label flex items-center gap-2.5 text-ink-2" style={{ ["--i" as string]: 0 }}>
             <span className="inline-block h-2 w-2 bg-accent" aria-hidden />
-            Program live on Solana devnet · no real money moves
+            Live on Solana devnet · bids in devnet USDC · no real money
           </p>
           <h1 className="display mt-6 text-[clamp(64px,10.6vw,152px)]">
             <span className="rise block" style={{ ["--i" as string]: 1 }}>Bid blind.</span>

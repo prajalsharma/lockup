@@ -11,7 +11,7 @@
  */
 import { createHash, createHmac } from "node:crypto";
 import { AnchorProvider, BN, Program, type Idl } from "@coral-xyz/anchor";
-import { TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction, createTransferInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, VersionedTransaction } from "@solana/web3.js";
 import {
   EPHEMERAL_VAULT_ID, MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID, PERMISSION_PROGRAM_ID, getAuthToken, permissionPdaFromAccount,
@@ -20,15 +20,18 @@ import nacl from "tweetnacl";
 import idl from "./idl.json";
 import {
   BID_MINT, DELEGATION_PROGRAM, ITEMS, PROGRAM, RPC, TEE_RPC, TEE_VALIDATOR, USD, VAULT, VRF_QUEUE, YARD,
-  bidPda, bidderPda, manifestPda, tapPda, unitPda, warehousePda,
+  bidPda, bidderPda, manifestPda, unitPda, warehousePda,
 } from "./shared";
 
 const TARGET_OPEN = 3;
 const WINDOW = 10; // how many recent units the keeper looks after
 const DURATION = 75; // seconds of sealed bidding
 const LINE_SECONDS = 15; // wait after the first player joins before the door locks
-const MIN_BID = 10 * USD;
-const HOUSE_DEPOSIT = 120 * USD;
+// Stakes are in Circle devnet USDC and deliberately small: the whole yard runs on a float of about 20 USDC.
+const MIN_BID = 0.1 * USD;
+const HOUSE_DEPOSIT = 1.2 * USD;
+const HOUSE_REFILL = 2.4 * USD;
+const STARTER_USDC = 1 * USD;
 const DRIP_LAMPORTS = 0.02 * LAMPORTS_PER_SOL;
 const perm = { permissionProgram: PERMISSION_PROGRAM_ID, ephemeralVault: EPHEMERAL_VAULT_ID, magicProgram: MAGIC_PROGRAM_ID };
 
@@ -113,6 +116,7 @@ const isHouse = (k: Keeper, who: PublicKey) => k.house.some((h) => h.publicKey.e
 
 /** What a house bidder offers, using nothing but the three public clues. */
 function houseBid(unit: PublicKey, n: number, clues: { kind: number; arg: number }[]): number {
+  // Item values and clue amounts are in cents.
   let est = 55;
   for (const c of clues) {
     if (c.kind === 0) est = Math.max(est, c.arg * 22);
@@ -121,8 +125,8 @@ function houseBid(unit: PublicKey, n: number, clues: { kind: number; arg: number
     if (c.kind === 4) est += c.arg * 14;
   }
   const r = createHash("sha256").update(unit.toBuffer()).update(`nerve-${n}`).digest().readUInt16LE(0) / 65535;
-  const dollars = Math.round(est * (0.4 + r * 0.4));
-  return Math.min(HOUSE_DEPOSIT, Math.max(MIN_BID, dollars * USD));
+  const cents = Math.round(est * (0.4 + r * 0.4));
+  return Math.min(HOUSE_DEPOSIT, Math.max(MIN_BID, cents * (USD / 100)));
 }
 
 export interface TickReport { did: string[]; errors: string[]; ms: number }
@@ -144,6 +148,7 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
   };
   try {
     const p = prog(connection, k.keeper);
+    const treasury = getAssociatedTokenAddressSync(BID_MINT, k.keeper.publicKey);
     const { yard, units } = await readUnits(k);
     const now = Math.floor(Date.now() / 1000);
     let waiting = 0;
@@ -164,18 +169,20 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
           const ata = getAssociatedTokenAddressSync(BID_MINT, h.publicKey);
           await step(`house ${n + 1} joins unit ${id}`, async () => {
             const hp = prog(connection, h);
-            const pre = [];
             if ((await connection.getBalance(h.publicKey)) < 0.01 * LAMPORTS_PER_SOL) {
               await p.provider.sendAndConfirm!(new Transaction().add(SystemProgram.transfer({ fromPubkey: k.keeper.publicKey, toPubkey: h.publicKey, lamports: 0.05 * LAMPORTS_PER_SOL })));
             }
             const bal = await connection.getTokenAccountBalance(ata).then((b) => Number(b.value.amount), () => 0);
             if (bal < HOUSE_DEPOSIT) {
-              pre.push(createAssociatedTokenAccountIdempotentInstruction(h.publicKey, ata, h.publicKey, BID_MINT));
-              pre.push(await hp.methods.faucet().accountsPartial({ user: h.publicKey, yard: YARD, bidMint: BID_MINT, userTokenAccount: ata, tap: tapPda(h.publicKey), tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).instruction());
+              // House bidders are funded from the keeper's own USDC, where winning bids are paid.
+              await p.provider.sendAndConfirm!(new Transaction().add(
+                createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, ata, h.publicKey, BID_MINT),
+                createTransferInstruction(treasury, ata, k.keeper.publicKey, HOUSE_REFILL),
+              ));
             }
             await hp.methods.joinUnit(new BN(HOUSE_DEPOSIT))
               .accountsPartial({ bidder: h.publicKey, yard: YARD, unit: key, bidderRecord: bidderPda(key, h.publicKey), bidderTokenAccount: ata, vault: VAULT, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId })
-              .preInstructions(pre).rpc();
+              .rpc();
           });
         }
         const humans = u.slots.filter((s: any) => !isHouse(k, s.bidder));
@@ -246,7 +253,7 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
         if (!unsettled.length && allClaimed) continue;
         for (const s of unsettled) {
           await step(`settle ${s.bidder.toBase58().slice(0, 4)} on unit ${id}`, () => p.methods.settleBidder()
-            .accountsPartial({ crank: k.keeper.publicKey, yard: YARD, unit: key, bidderRecord: bidderPda(key, s.bidder), bidderTokenAccount: getAssociatedTokenAddressSync(BID_MINT, s.bidder), vault: VAULT, tokenProgram: TOKEN_PROGRAM_ID }).rpc());
+            .accountsPartial({ crank: k.keeper.publicKey, yard: YARD, unit: key, bidderRecord: bidderPda(key, s.bidder), bidderTokenAccount: getAssociatedTokenAddressSync(BID_MINT, s.bidder), vault: VAULT, treasury, tokenProgram: TOKEN_PROGRAM_ID }).rpc());
         }
         if (hasWinner && !allClaimed) {
           const winnerIndex = u.slots.findIndex((s: any) => s.bidder.equals(u.winner));
@@ -287,14 +294,37 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
 }
 
 let lastDrip = 0;
-/** Give a new player a little devnet SOL for fees. Small, rate-limited, and only when they have none. */
-export async function drip(k: Keeper, to: PublicKey): Promise<string> {
-  if (Date.now() - lastDrip < 8000) return "busy";
-  const [theirs, ours] = await Promise.all([connection.getBalance(to), connection.getBalance(k.keeper.publicKey)]);
-  if (theirs >= 0.01 * LAMPORTS_PER_SOL) return "has-sol";
-  if (ours < 0.3 * LAMPORTS_PER_SOL) return "empty";
-  lastDrip = Date.now();
-  const p = prog(connection, k.keeper);
-  await p.provider.sendAndConfirm!(new Transaction().add(SystemProgram.transfer({ fromPubkey: k.keeper.publicKey, toPubkey: to, lamports: DRIP_LAMPORTS })));
-  return "sent";
+export interface DripResult { sol: "sent" | "has" | "empty" | "busy"; usdc: "sent" | "has" | "empty" | "busy" | "already" }
+/**
+ * Starter funds for a new player: a little devnet SOL for fees and 1 USDC to bid with.
+ * SOL goes to any wallet that has none. USDC goes only to a wallet that has never held a USDC
+ * account, so each wallet gets it once; after that, more comes from Circle's faucet.
+ */
+export async function drip(k: Keeper, to: PublicKey): Promise<DripResult> {
+  if (Date.now() - lastDrip < 6000) return { sol: "busy", usdc: "busy" };
+  const treasury = getAssociatedTokenAddressSync(BID_MINT, k.keeper.publicKey);
+  const ata = getAssociatedTokenAddressSync(BID_MINT, to);
+  const [theirs, ours, theirAta, float] = await Promise.all([
+    connection.getBalance(to), connection.getBalance(k.keeper.publicKey), connection.getAccountInfo(ata),
+    connection.getTokenAccountBalance(treasury).then((b) => Number(b.value.amount), () => 0),
+  ]);
+  const tx = new Transaction();
+  const out: DripResult = { sol: "has", usdc: theirAta ? "already" : "has" };
+  if (theirs < 0.01 * LAMPORTS_PER_SOL) {
+    if (ours < 0.15 * LAMPORTS_PER_SOL) out.sol = "empty";
+    else { tx.add(SystemProgram.transfer({ fromPubkey: k.keeper.publicKey, toPubkey: to, lamports: DRIP_LAMPORTS })); out.sol = "sent"; }
+  }
+  if (!theirAta) {
+    // Keep enough back to fund the house bidders.
+    if (float < 6 * USD) out.usdc = "empty";
+    else {
+      tx.add(createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, ata, to, BID_MINT), createTransferInstruction(treasury, ata, k.keeper.publicKey, STARTER_USDC));
+      out.usdc = "sent";
+    }
+  }
+  if (tx.instructions.length) {
+    lastDrip = Date.now();
+    await prog(connection, k.keeper).provider.sendAndConfirm!(tx);
+  }
+  return out;
 }

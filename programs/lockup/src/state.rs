@@ -17,7 +17,7 @@ pub enum UnitStatus {
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, InitSpace, Default)]
 pub struct Item {
     pub mint: Pubkey,
-    /// Appraised value in whole test dollars.
+    /// Appraised value in cents of the bid currency.
     pub value: u32,
     pub weight: u16,
     pub rarity: u8,

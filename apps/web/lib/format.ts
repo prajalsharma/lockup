@@ -1,4 +1,5 @@
-export const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
+/** USDC amounts, always to the cent. */
+export const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 export const pad2 = (n: number) => String(n).padStart(2, "0");
 export function clock(ms: number) {
   const s = Math.max(0, Math.ceil(ms / 1000));

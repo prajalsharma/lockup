@@ -9,7 +9,7 @@ export default function YardPage() {
   return (
     <div className="wrap pb-28 pt-28 md:pt-36">
       <div className="border-b border-line pb-10">
-        <p className="label flex items-center gap-2.5 text-ink-2"><span className="inline-block h-2 w-2 bg-accent" aria-hidden />Live on Solana devnet · test tokens only</p>
+        <p className="label flex items-center gap-2.5 text-ink-2"><span className="inline-block h-2 w-2 bg-accent" aria-hidden />Live on Solana devnet · bids in devnet USDC</p>
         <h1 className="display mt-4 text-[clamp(64px,9vw,136px)]">The yard</h1>
         <p className="mt-4 max-w-[560px] text-[17px] text-ink-2">These doors are real accounts on Solana. Line up with a deposit, read the clues once the door locks, and seal a bid on MagicBlock's private rollup. Two house bidders play every unit; they see the same three clues you do.</p>
       </div>

@@ -9,7 +9,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { BN } from "@coral-xyz/anchor";
-import { TOKEN_PROGRAM_ID, getOrCreateAssociatedTokenAccount } from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, getOrCreateAssociatedTokenAccount, transfer } from "@solana/spl-token";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import {
   EPHEMERAL_VAULT_ID, MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID, PERMISSION_PROGRAM_ID, permissionPdaFromAccount,
@@ -19,10 +19,11 @@ import {
 } from "./lib";
 
 const DURATION = Number(process.env.DURATION ?? 45);
-const MIN_BID = 10n * USD;
+const CENT = USD / 100n;
+const MIN_BID = 10n * CENT;
 const PLAN = [
-  { label: "A", deposit: 200n * USD, bid: 120n * USD },
-  { label: "B", deposit: 150n * USD, bid: 90n * USD },
+  { label: "A", deposit: 100n * CENT, bid: 60n * CENT },
+  { label: "B", deposit: 80n * CENT, bid: 45n * CENT },
 ];
 const results: { step: string; ok: boolean; note?: string }[] = [];
 const record = (step: string, ok: boolean, note?: string) => {
@@ -58,7 +59,8 @@ async function main() {
 
   console.log("LOCKUP round", { program: programId.toBase58(), unit: unit.toBase58(), unitId: Number(unitId), operator: operator.publicKey.toBase58() });
 
-  head("Solana: fund bidders, faucet");
+  const treasury = getAssociatedTokenAddressSync(bidMint, operator.publicKey);
+  head("Solana: fund bidders");
   const atas: PublicKey[] = [];
   for (const [i, kp] of wallets.entries()) {
     if ((await connection.getBalance(kp.publicKey)) < 0.03 * LAMPORTS_PER_SOL) {
@@ -67,11 +69,11 @@ async function main() {
     const ata = await retry(() => getOrCreateAssociatedTokenAccount(connection, operator, bidMint, kp.publicKey));
     atas.push(ata.address);
     if (BigInt(ata.amount.toString()) < PLAN[i].deposit) {
+      // Bidders are funded with devnet USDC from the operator.
       try {
-        await retry(() => programFor(idl, connection, kp).methods.faucet()
-          .accountsPartial({ user: kp.publicKey, yard: p.yard, bidMint, userTokenAccount: ata.address, tap: p.tap(kp.publicKey), tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc());
-        record(`faucet ${PLAN[i].label}`, true);
-      } catch (e) { record(`faucet ${PLAN[i].label}`, false, msg(e)); }
+        await retry(() => transfer(connection, operator, treasury, ata.address, operator, PLAN[i].deposit));
+        record(`fund ${PLAN[i].label} with USDC`, true);
+      } catch (e) { record(`fund ${PLAN[i].label} with USDC`, false, msg(e)); }
     }
     await sleep(800);
   }
@@ -156,7 +158,7 @@ async function main() {
     record("close_unit", true);
   } catch (e) { record("close_unit", false, msg(e)); logs(e); return finish(); }
   u = await (teeOp.account as any).unit.fetch(unit);
-  console.log("    winner:", u.winner.toBase58(), "bid", Number(u.winningBid) / 1e6, "value $" + u.value);
+  console.log("    winner:", u.winner.toBase58(), "bid", Number(u.winningBid) / 1e6, "value $" + (u.value / 100).toFixed(2));
   console.log("    lots:", u.lots.map((l: any) => `${l.qty}× ${CATALOG[l.item].name}`).join(", "));
 
   try {
@@ -179,7 +181,7 @@ async function main() {
   for (const [i, kp] of wallets.entries()) {
     const before = BigInt((await connection.getTokenAccountBalance(atas[i])).value.amount);
     try {
-      await retry(() => program.methods.settleBidder().accountsPartial({ crank: operator.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, kp.publicKey), bidderTokenAccount: atas[i], vault: p.vault, tokenProgram: TOKEN_PROGRAM_ID }).rpc());
+      await retry(() => program.methods.settleBidder().accountsPartial({ crank: operator.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, kp.publicKey), bidderTokenAccount: atas[i], vault: p.vault, treasury, tokenProgram: TOKEN_PROGRAM_ID }).rpc());
       const after = BigInt((await connection.getTokenAccountBalance(atas[i])).value.amount);
       const won = (u.winner as PublicKey).equals(kp.publicKey);
       const want = won ? PLAN[i].deposit - PLAN[i].bid : PLAN[i].deposit;

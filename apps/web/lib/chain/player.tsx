@@ -1,6 +1,6 @@
 "use client";
 /**
- * The player's wallet and the three things a player does on chain: get test dollars, line up
+ * The player's wallet and the things a player does on chain: get starter funds, line up
  * with a deposit (Solana), and place a sealed bid (private rollup).
  *
  * Two kinds of wallet: any Solana wallet extension found through the wallet standard
@@ -8,13 +8,13 @@
  * this browser. Both sign locally; the site never sees a key from an extension.
  */
 import { ConnectionProvider, WalletProvider, useWallet } from "@solana/wallet-adapter-react";
-import { TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import nacl from "tweetnacl";
 import dynamic from "next/dynamic";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { EmailWalletCtx, PRIVY_APP_ID } from "./email-wallet";
-import { BID_MINT, RPC, TEE_RPC, USD, VAULT, YARD, bidPda, bidderPda, sleep, tapPda, unitPda } from "./shared";
+import { BID_MINT, RPC, TEE_RPC, USD, VAULT, YARD, bidPda, bidderPda, sleep, unitPda } from "./shared";
 
 interface Signer {
   kind: "quick" | "extension" | "email";
@@ -85,6 +85,7 @@ const plain = (e: unknown) => {
   if (named) return named[1] + ".";
   if (/User rejected|rejected the request|cancel/i.test(m)) return "You cancelled that in your wallet.";
   if (/insufficient lamports|insufficient funds for (fee|rent)|Attempt to debit/i.test(m)) return "This wallet has no devnet SOL for fees.";
+  if (/^Not enough USDC|^Starter USDC/.test(m)) return m;
   if (/429|Too Many/i.test(m)) return "Devnet is busy. Try again in a few seconds.";
   if (/does not support|signMessage/i.test(m)) return "This wallet can't sign messages, which the private rollup needs. Try another wallet.";
   return m.split("\n")[0].slice(0, 140);
@@ -186,31 +187,32 @@ function Inner({ children }: { children: React.ReactNode }) {
     return sig;
   }, []);
 
-  /** Make sure the wallet can pay fees: ask the keeper for a little devnet SOL if it has none. */
-  const ensureSol = useCallback(async (s: Signer) => {
-    if ((await connection.getBalance(s.publicKey)) >= 0.005 * LAMPORTS_PER_SOL) return;
-    setBusy("Getting devnet SOL for fees");
+  /**
+   * Starter funds from the keeper: devnet SOL for fees if the wallet has none, and 1 USDC the
+   * first time a wallet shows up. Returns what the wallet holds afterwards.
+   */
+  const starter = useCallback(async (s: Signer) => {
+    const before = await refreshFor(s.publicKey);
+    const needSol = (before?.lamports ?? 0) < 0.005 * LAMPORTS_PER_SOL;
+    const needUsdc = (before?.tok ?? 0) === 0;
+    if (!needSol && !needUsdc) return before;
+    setBusy("Getting starter funds");
+    let r: { sol?: string; usdc?: string } = {};
     for (let i = 0; i < 4; i++) {
-      const r = await fetch("/api/drip", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ address: s.publicKey.toBase58() }) }).then((x) => x.json()).catch(() => ({ result: "error" }));
-      if (r.result === "sent" || r.result === "has-sol") break;
-      if (r.result === "empty" || r.result === "off") throw new Error("This wallet has no devnet SOL for fees.");
-      await sleep(3000);
+      r = await fetch("/api/drip", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ address: s.publicKey.toBase58() }) }).then((x) => x.json()).catch(() => ({}));
+      if (r.sol !== "busy" && r.sol !== undefined) break;
+      await sleep(3500);
     }
-    for (let i = 0; i < 12; i++) {
-      if ((await connection.getBalance(s.publicKey)) >= 0.005 * LAMPORTS_PER_SOL) return;
+    if (needSol && r.sol !== "sent") throw new Error("This wallet has no devnet SOL for fees.");
+    for (let i = 0; i < 10; i++) {
+      const now = await refreshFor(s.publicKey);
+      const solOk = !needSol || (now?.lamports ?? 0) >= 0.005 * LAMPORTS_PER_SOL;
+      const usdcOk = r.usdc !== "sent" || (now?.tok ?? 0) > 0;
+      if (solOk && usdcOk) return now;
       await sleep(1500);
     }
-    throw new Error("This wallet has no devnet SOL for fees.");
-  }, [connection]);
-
-  const faucetIxs = useCallback(async (s: Signer) => {
-    const { program } = await chainKit();
-    const ata = getAssociatedTokenAddressSync(BID_MINT, s.publicKey);
-    return [
-      createAssociatedTokenAccountIdempotentInstruction(s.publicKey, ata, s.publicKey, BID_MINT),
-      await program(connection, s.publicKey).methods.faucet().accountsPartial({ user: s.publicKey, yard: YARD, bidMint: BID_MINT, userTokenAccount: ata, tap: tapPda(s.publicKey), tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).instruction(),
-    ];
-  }, [connection]);
+    return refreshFor(s.publicKey);
+  }, [refreshFor]);
 
   const run = useCallback(async (label: string, f: (s: Signer) => Promise<void>) => {
     if (!signer) { setPickerOpen(true); return false; }
@@ -218,26 +220,24 @@ function Inner({ children }: { children: React.ReactNode }) {
     try { await f(signer); return true; } catch (e) { setError(plain(e)); return false; } finally { setBusy(null); void refreshFor(signer.publicKey); }
   }, [signer, refreshFor]);
 
-  const topUp = useCallback(() => run("Getting 500 test dollars", async (s) => {
-    await ensureSol(s);
-    setBusy("Getting 500 test dollars");
-    await send(s, new Transaction().add(...(await faucetIxs(s))), connection);
-  }), [run, ensureSol, send, faucetIxs, connection]);
+  const topUp = useCallback(() => run("Getting starter funds", async (s) => {
+    const after = await starter(s);
+    if ((after?.tok ?? 0) === 0) throw new Error("Starter USDC is given once per wallet. Get more from Circle's faucet.");
+  }), [run, starter]);
 
   const join = useCallback((unitId: number, deposit: number) => run("Lining up", async (s) => {
-    await ensureSol(s);
+    const funds = await starter(s);
     const { BN, program } = await chainKit();
-    const have = (await refreshFor(s.publicKey))?.tok ?? 0;
+    const have = funds?.tok ?? 0;
     const need = Math.round(deposit * USD);
+    if (have < need) throw new Error(`Not enough USDC. Deposit is $${deposit.toFixed(2)}, wallet has $${(have / USD).toFixed(2)}.`);
     const unit = unitPda(unitId);
     const ata = getAssociatedTokenAddressSync(BID_MINT, s.publicKey);
-    const tx = new Transaction();
-    if (have < need) tx.add(...(await faucetIxs(s)));
-    tx.add(await program(connection, s.publicKey).methods.joinUnit(new BN(need))
+    const tx = new Transaction().add(await program(connection, s.publicKey).methods.joinUnit(new BN(need))
       .accountsPartial({ bidder: s.publicKey, yard: YARD, unit, bidderRecord: bidderPda(unit, s.publicKey), bidderTokenAccount: ata, vault: VAULT, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).instruction());
     setBusy("Lining up with your deposit");
     await send(s, tx, connection);
-  }), [run, ensureSol, refreshFor, faucetIxs, connection, send]);
+  }), [run, starter, connection, send]);
 
   const bid = useCallback((unitId: number, amount: number) => run("Opening the private rollup", async (s) => {
     const { BN, program, mb } = await chainKit();

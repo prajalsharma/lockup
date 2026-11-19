@@ -15,3 +15,5 @@ export interface EmailWallet {
 
 export const EmailWalletCtx = createContext<EmailWallet | null>(null);
 export const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? "";
+/** Google sign-in also has to be switched on in the Privy dashboard before this is set. */
+export const PRIVY_GOOGLE = process.env.NEXT_PUBLIC_PRIVY_GOOGLE === "1";

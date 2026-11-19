@@ -26,8 +26,8 @@ export async function GET() {
         minBid: Number(u.minBid) / 1e6, duration: Number(u.duration), closesAt: Number(u.closesAt) * 1000, bidCount: u.bidCount,
         bids: u.slots.map((s: any) => ({ who: s.bidder.toBase58(), house: house.has(s.bidder.toBase58()), deposit: Number(s.deposit) / 1e6, hasBid: s.hasBid, bid: closed && s.hasBid ? Number(s.bid) / 1e6 : null })),
         clues: u.stocked ? u.clues.map((c: any) => ({ kind: c.kind, arg: c.arg })) : [],
-        winner, winningBid: Number(u.winningBid) / 1e6, value: u.value,
-        lots: closed ? u.lots.map((l: any) => ({ name: ITEMS[l.item].name, id: ITEMS[l.item].id, rarity: ITEMS[l.item].rarity, heavy: ITEMS[l.item].heavy, qty: l.qty, value: ITEMS[l.item].value * l.qty })) : [],
+        winner, winningBid: Number(u.winningBid) / 1e6, value: u.value / 100,
+        lots: closed ? u.lots.map((l: any) => ({ name: ITEMS[l.item].name, id: ITEMS[l.item].id, rarity: ITEMS[l.item].rarity, heavy: ITEMS[l.item].heavy, qty: l.qty, value: (ITEMS[l.item].value * l.qty) / 100 })) : [],
         claimed: closed && u.lots.length > 0 && u.claimedMask === (1 << u.lots.length) - 1,
       };
     });

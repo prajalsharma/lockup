@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { PRIVY_GOOGLE } from "@/lib/chain/email-wallet";
 import { usePlayer } from "@/lib/chain/player";
 import { explorer } from "@/lib/config";
 import { short, usd } from "@/lib/format";
@@ -32,11 +33,12 @@ export function ConnectButton() {
           <p className="label text-ink-3">{p.walletName} · devnet</p>
           <p className="num mt-1 break-all text-[13px]">{p.address}</p>
           <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-line pt-4">
-            <div><dt className="label text-ink-3">Test dollars</dt><dd className="num mt-1">{p.dollars === null ? "reading" : usd(p.dollars)}</dd></div>
+            <div><dt className="label text-ink-3">Devnet USDC</dt><dd className="num mt-1">{p.dollars === null ? "reading" : usd(p.dollars)}</dd></div>
             <div><dt className="label text-ink-3">Devnet SOL</dt><dd className="num mt-1">{p.sol === null ? "reading" : p.sol.toFixed(3)}</dd></div>
           </dl>
           <div className="mt-4 flex flex-col gap-2">
-            <button type="button" role="menuitem" className="btn btn-ghost btn-sm" disabled={!!p.busy} onClick={() => void p.topUp()}>{p.busy ?? "Get 500 test dollars"}</button>
+            {p.dollars === 0 && <button type="button" role="menuitem" className="btn btn-ghost btn-sm" disabled={!!p.busy} onClick={() => void p.topUp()}>{p.busy ?? "Get starter USDC"}</button>}
+            <a role="menuitem" className="btn btn-ghost btn-sm" href="https://faucet.circle.com" target="_blank" rel="noreferrer">Circle USDC faucet</a>
             <button type="button" role="menuitem" className="btn btn-ghost btn-sm" onClick={() => { void navigator.clipboard?.writeText(p.address!); setCopied(true); setTimeout(() => setCopied(false), 1400); }}>{copied ? "Copied" : "Copy address"}</button>
             <a role="menuitem" className="btn btn-ghost btn-sm" href={explorer(p.address)} target="_blank" rel="noreferrer">Open in explorer</a>
             <button type="button" role="menuitem" className="btn btn-ghost btn-sm" onClick={() => { p.disconnect(); setMenu(false); }}>Disconnect</button>
@@ -79,7 +81,7 @@ export function WalletPicker() {
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="1" y="2.5" width="12" height="9" rx="1" /><path d="M1.5 3.5L7 8l5.5-4.5" /></svg>
                 </span>
                 <span>
-                  <span className="block text-[17px] font-semibold">Email or Google</span>
+                  <span className="block text-[17px] font-semibold">{PRIVY_GOOGLE ? "Email or Google" : "Email"}</span>
                   <span className="block text-sm text-ink-2">Sign in and get a wallet made for you.</span>
                 </span>
                 <span className="label ml-auto text-ink-3 transition-colors group-hover:text-ink">No install</span>
@@ -110,7 +112,7 @@ export function WalletPicker() {
         </ul>
         {p.choices.length === 0 && <p className="mt-4 text-sm text-ink-2">No wallet extension found in this browser. Install Phantom, Solflare or Backpack, or pick another option above.</p>}
         {p.error && <p role="alert" className="mt-4 text-sm text-bad">{p.error}</p>}
-        <p className="mt-5 text-sm text-ink-3">New wallets get a little devnet SOL for fees and can claim 500 test dollars. Nothing here has real value.</p>
+        <p className="mt-5 text-sm text-ink-3">New wallets are sent a little devnet SOL for fees and 1 devnet USDC to start. Nothing here has real value.</p>
       </div>
     </div>
   );

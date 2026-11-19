@@ -45,7 +45,7 @@ export function HaulView() {
         <div><dt className="label text-ink-3">Units opened</dt><dd className="display num mt-1 text-[56px] leading-none">{wins.length}<span className="text-ink-3"> / {data.rounds.length}</span></dd></div>
         <div><dt className="label text-ink-3">Paid for them</dt><dd className="display num mt-1 text-[56px] leading-none">{usd(paid)}</dd></div>
         <div><dt className="label text-ink-3">{net >= 0 ? "Ahead by" : "Down by"}</dt><dd className={`display num mt-1 text-[56px] leading-none ${net >= 0 ? "text-accent-text" : "text-bad"}`}>{usd(Math.abs(net))}</dd></div>
-        <div><dt className="label text-ink-3">Test dollars</dt><dd className="display num mt-1 text-[56px] leading-none">{usd(data.dollars)}</dd></div>
+        <div><dt className="label text-ink-3">Devnet USDC</dt><dd className="display num mt-1 text-[56px] leading-none">{usd(data.dollars)}</dd></div>
       </dl>
 
       <section className="mt-14" aria-labelledby="shelf">

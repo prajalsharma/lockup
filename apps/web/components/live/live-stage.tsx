@@ -47,8 +47,8 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const reduced = useReducedMotion();
   const unit = data?.units.find((u) => u.id === unitId);
   const [found, setFound] = useState([false, false, false]);
-  const [deposit, setDeposit] = useState(100);
-  const [amount, setAmount] = useState(40);
+  const [deposit, setDeposit] = useState(1);
+  const [amount, setAmount] = useState(0.4);
   const [shown, setShown] = useState(false);
   const prev = useRef<string>("");
 
@@ -90,6 +90,8 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const lots = closed ? unit.lots : null;
   const onFound = (i: number) => setFound((f) => { if (f[i]) return f; sfx.clue(); const n = [...f]; n[i] = true; return n; });
   const maxBid = mine ? mine.deposit : 0;
+  // You can deposit up to what the wallet holds, capped at $5 so one unit can't swallow a balance.
+  const depositCap = Math.max(unit.minBid, Math.min(5, Math.floor((p.dollars ?? 1) * 20) / 20));
 
   let phaseLabel = "Line is open";
   let big = "—";
@@ -136,11 +138,11 @@ export function LiveStage({ unitId }: { unitId: number }) {
               </div>
               <div className="mt-2 flex items-baseline gap-1">
                 <span className="display text-[56px] text-ink-3">$</span>
-                <input id="deposit" inputMode="numeric" value={deposit} onChange={(e) => setDeposit(Math.min(500, Number(e.target.value.replace(/\D/g, "")) || 0))} className="display num w-full bg-transparent text-[72px] leading-none outline-none" />
+                <input id="deposit" type="number" inputMode="decimal" step="0.05" min={unit.minBid} max={depositCap} value={deposit} onChange={(e) => setDeposit(Math.min(depositCap, Math.max(0, Number(e.target.value) || 0)))} className="display num w-full bg-transparent text-[72px] leading-none outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none" />
               </div>
-              <input type="range" className="bid mt-1" min={unit.minBid} max={500} value={Math.max(unit.minBid, deposit)} onChange={(e) => setDeposit(Number(e.target.value))} aria-label="Deposit amount" />
+              <input type="range" className="bid mt-1" min={unit.minBid} max={depositCap} step={0.05} value={Math.min(depositCap, Math.max(unit.minBid, deposit))} onChange={(e) => setDeposit(Number(e.target.value))} aria-label="Deposit amount" />
               <button type="submit" className="btn btn-primary mt-4 w-full" disabled={!!p.busy || deposit < unit.minBid}>{p.busy ?? "Get in line"} {!p.busy && <span className="arrow" aria-hidden>→</span>}</button>
-              <p className="mt-3 text-sm text-ink-2">The deposit is the most you can bid, and everyone can see it. Your bid stays hidden. Whatever you don't spend comes back.</p>
+              <p className="mt-3 text-sm text-ink-2">The deposit is the most you can bid, and everyone can see it. Your bid stays hidden. Whatever you don't spend comes back. New wallets are sent 1 USDC to start.</p>
             </form>
           )}
 
@@ -176,9 +178,9 @@ export function LiveStage({ unitId }: { unitId: number }) {
               </div>
               <div className="mt-2 flex items-baseline gap-1">
                 <span className="display text-[56px] text-ink-3">$</span>
-                <input id="bid" inputMode="numeric" value={amount} onChange={(e) => setAmount(Math.min(maxBid, Number(e.target.value.replace(/\D/g, "")) || 0))} className="display num w-full bg-transparent text-[72px] leading-none outline-none" />
+                <input id="bid" type="number" inputMode="decimal" step="0.05" min={unit.minBid} max={maxBid} value={amount} onChange={(e) => setAmount(Math.min(maxBid, Math.max(0, Number(e.target.value) || 0)))} className="display num w-full bg-transparent text-[72px] leading-none outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none" />
               </div>
-              <input type="range" className="bid mt-1" min={unit.minBid} max={maxBid} value={Math.min(maxBid, Math.max(unit.minBid, amount))} onChange={(e) => setAmount(Number(e.target.value))} aria-label="Bid amount" />
+              <input type="range" className="bid mt-1" min={unit.minBid} max={maxBid} step={0.05} value={Math.min(maxBid, Math.max(unit.minBid, amount))} onChange={(e) => setAmount(Number(e.target.value))} aria-label="Bid amount" />
               <button type="submit" className="btn btn-primary mt-4 w-full" disabled={!!p.busy || amount < unit.minBid || amount > maxBid}>{p.busy ?? "Seal my bid"} {!p.busy && <span className="arrow" aria-hidden>→</span>}</button>
               <p className="mt-3 text-sm text-ink-2">Your bid goes to MagicBlock's private rollup. Nobody else can read it until the door opens.{!p.isQuick && " Your wallet will ask you to sign a message to open the rollup, then to approve the bid."}</p>
             </form>
