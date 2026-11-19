@@ -7,7 +7,7 @@ import yardFile from "./chain/yard.json";
 
 export const PROGRAM_ID = process.env.NEXT_PUBLIC_PROGRAM_ID ?? yardFile.programId;
 export const YARD_ADDRESS = yardFile.yard;
-export const REPO_URL = process.env.NEXT_PUBLIC_REPO_URL ?? "";
+export const REPO_URL = process.env.NEXT_PUBLIC_REPO_URL ?? "https://github.com/prajalsharma/lockup";
 export const DEVNET_RPC = process.env.NEXT_PUBLIC_RPC_URL ?? "https://api.devnet.solana.com";
 
 /** MagicBlock programs LOCKUP calls. Read from ephemeral-rollups-sdk 0.16.2 and its VRF SDK. */
