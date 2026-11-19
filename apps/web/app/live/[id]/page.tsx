@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LiveStage } from "@/components/live/live-stage";
-import { PlayerProvider } from "@/lib/chain/player";
 import { pad2 } from "@/lib/format";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -17,7 +16,7 @@ export default async function LiveUnitPage({ params }: { params: Promise<{ id: s
   return (
     <div className="wrap pb-24 pt-24 md:pt-28">
       <Link href="/yard" className="ulink label text-ink-2">← Back to the yard</Link>
-      <div className="mt-6"><PlayerProvider><LiveStage unitId={n} /></PlayerProvider></div>
+      <div className="mt-6"><LiveStage unitId={n} /></div>
     </div>
   );
 }

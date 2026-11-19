@@ -13,7 +13,7 @@ export interface ChainUnit {
   winner: string | null;
   winningBid: number;
   value: number;
-  lots: { name: string; id: string; rarity: number; qty: number; value: number }[];
+  lots: DoorLot[];
   claimed: boolean;
 }
 export interface ChainYard {
@@ -24,4 +24,26 @@ export interface ChainYard {
   keeper: boolean;
   units: ChainUnit[];
   readAt: number;
+}
+
+/** One lot of a unit's contents, as shown in the 3D unit and the result lists. */
+export interface DoorLot { name: string; id: string; rarity: number; heavy: boolean; qty: number; value: number }
+
+export interface HaulRound {
+  unit: number;
+  address: string;
+  status: ChainUnit["status"];
+  deposit: number;
+  bid: number | null;
+  won: boolean;
+  settled: boolean;
+  winningBid: number;
+  value: number;
+  lots: DoorLot[];
+}
+export interface Haul {
+  address: string;
+  dollars: number;
+  items: { name: string; id: string; rarity: number; qty: number; value: number; mint: string }[];
+  rounds: HaulRound[];
 }

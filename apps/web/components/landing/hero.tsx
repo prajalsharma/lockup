@@ -1,13 +1,17 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
+import { clueText, useChainYard } from "@/components/chain-rounds";
 import { Door } from "@/components/door/door";
+import { pad2, usd } from "@/lib/format";
 import { Facts } from "./facts";
-
-const CLUES = ["5 items inside", "A coin slot was spotted", "Worth at least $90"];
 
 export function Hero() {
   const [found, setFound] = useState([false, false, false]);
+  // The door shows a real unit: the newest one on devnet that has clues posted.
+  const { data } = useChainYard(20000);
+  const real = data?.units.filter((u) => u.clues.length === 3).sort((a, b) => b.id - a.id)[0] ?? null;
+  const clues = real ? real.clues.map(clueText) : [];
   return (
     <section className="relative border-b border-line">
       <div className="grid min-h-[100svh] lg:grid-cols-[minmax(0,1fr)_minmax(0,0.92fr)]">
@@ -33,11 +37,13 @@ export function Hero() {
         <div className="relative order-first h-[46svh] border-b border-line lg:order-none lg:h-auto lg:border-b-0 lg:border-l">
           <Door
             className="absolute inset-0 cursor-crosshair"
-            unit={7} clues={CLUES} found={found} attract open={false}
+            key={real?.id ?? 0} unit={real?.id ?? 1} clues={clues} found={found} attract open={false}
             onFound={(i) => setFound((f) => { const n = [...f]; n[i] = true; return n; })}
-            label="A locked storage unit, number 07, lit by a torch. Three paper clue tags hang on the door."
+            label="A locked storage unit lit by a torch. Paper clue tags hang on the door."
           />
-          <p className="label pointer-events-none absolute bottom-4 left-5 hidden text-[#a9a498] lg:block">Move the torch. Find the clues.</p>
+          <p className="label absolute bottom-4 left-5 hidden text-[#a9a498] lg:block">
+            {real ? <>Real clues from <Link className="ulink" href={`/live/${real.id}`}>unit {pad2(real.id)}</Link>{real.status === "closed" && real.winner ? `, opened for ${usd(real.winningBid)}` : ", bidding now"}</> : "Move the torch over the door"}
+          </p>
         </div>
       </div>
     </section>

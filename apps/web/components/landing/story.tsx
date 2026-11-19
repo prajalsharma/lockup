@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { pad2 } from "@/lib/format";
+import { clueText, useChainYard } from "@/components/chain-rounds";
+import { pad2, short, usd } from "@/lib/format";
 
 const STEPS = [
   { title: "The unit is stocked", body: "A random draw decides what goes inside. Nobody picks the contents, including us. The draw comes from MagicBlock VRF, mixed with a salt we lock in beforehand and publish afterwards." },
@@ -10,18 +11,16 @@ const STEPS = [
   { title: "The door rolls up", body: "The contents move to the winner's wallet on Solana, and the bids are published so the result can be checked." },
 ];
 
-const BIDS = [
-  { who: "7xKp…3fQa", bid: 64 },
-  { who: "You", bid: 88 },
-  { who: "Dm2v…9LzE", bid: 51 },
-];
-const TAGS = ["4 items inside", "A coin slot was spotted", "Worth at least $60"];
-const CRATES = [{ n: "Arcade cabinet", v: 120 }, { n: "Crate of vinyl", v: 26 }, { n: "Skate decks", v: 22 }];
-
 export function Story() {
   const ref = useRef<HTMLElement>(null);
   const [step, setStep] = useState(0);
   const [progress, setProgress] = useState(0);
+  // The stage replays a real unit: the newest one opened on devnet.
+  const { data } = useChainYard(30000);
+  const real = data?.units.filter((u) => u.status === "closed" && u.winner).sort((a, b) => b.id - a.id)[0] ?? null;
+  const TAGS = real ? real.clues.map(clueText) : [];
+  const BIDS = real ? [...real.bids].filter((b) => b.bid !== null).sort((a, b) => (b.bid ?? 0) - (a.bid ?? 0)).slice(0, 4).map((b) => ({ who: short(b.who), bid: b.bid ?? 0, top: b.who === real.winner })) : [];
+  const CRATES = real ? real.lots.slice(0, 3).map((l) => ({ n: l.qty > 1 ? `${l.qty} × ${l.name}` : l.name, v: l.value, grail: l.rarity === 2 })) : [];
 
   useEffect(() => {
     let raf = 0;
@@ -56,7 +55,7 @@ export function Story() {
               <div className="absolute inset-x-0 bottom-0 flex items-end justify-center gap-[4%] px-[6%] pb-[5%]">
                 {CRATES.map((c, i) => (
                   <div key={c.n} className={`${T} flex aspect-square w-[27%] flex-col justify-between bg-[#b39a6b] p-[5%] text-[#14110a] ${step === 0 ? "delay-[var(--d)]" : ""}`}
-                    style={{ ["--d" as string]: `${i * 120}ms`, transform: step === 0 || step === 4 ? "none" : "translateY(8%)", background: i === 0 && step === 4 ? "#ffb01f" : undefined }}>
+                    style={{ ["--d" as string]: `${i * 120}ms`, transform: step === 0 || step === 4 ? "none" : "translateY(8%)", background: c.grail && step === 4 ? "#ffb01f" : undefined }}>
                     <span className="font-mono text-[clamp(8px,1.1vw,12px)] font-semibold leading-tight">{step === 4 ? c.n : "?"}</span>
                     <span className="font-mono text-[clamp(8px,1.1vw,12px)]">{step === 4 ? `$${c.v}` : ""}</span>
                   </div>
@@ -65,7 +64,7 @@ export function Story() {
               <div className={`${T} absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(255,180,90,0.28),transparent_70%)]`} style={{ opacity: step === 4 ? 1 : 0.25 }} />
               {/* door */}
               <div className={`${T} steel absolute inset-0`} style={{ ["--door" as string]: "#4d5560", transform: doorUp ? "translateY(-94%)" : "none" }}>
-                <span className="stencil absolute left-1/2 top-[34%] -translate-x-1/2 text-[clamp(64px,13vw,150px)] text-[#efeae0]/85">07</span>
+                <span className="stencil absolute left-1/2 top-[34%] -translate-x-1/2 text-[clamp(64px,13vw,150px)] text-[#efeae0]/85">{real ? pad2(real.id) : ""}</span>
                 {TAGS.map((t, i) => (
                   <span key={t} className={`${T} absolute bg-[#d9c9a3] px-[3%] py-[1.5%] font-mono text-[clamp(8px,1vw,12px)] font-semibold text-[#14110a]`}
                     style={{ left: `${[8, 52, 20][i]}%`, top: `${[14, 46, 76][i]}%`, opacity: step >= 1 ? 1 : 0, transform: `rotate(${[-3, 2, 1.5][i]}deg) translateY(${step >= 1 ? 0 : 8}px)`, transitionDelay: `${i * 110}ms` }}>
@@ -75,11 +74,11 @@ export function Story() {
               </div>
             </div>
             {/* bids */}
-            <div className={`${T} absolute right-[3%] top-[8%] w-[38%] border border-[#efeae0]/20 bg-[#0a0b0e] p-[3%]`} style={{ opacity: step >= 2 ? 1 : 0, transform: step >= 2 ? "none" : "translateX(12px)" }}>
+            <div className={`${T} absolute right-[3%] top-[8%] w-[38%] border border-[#efeae0]/20 bg-[#0a0b0e] p-[3%]`} style={{ opacity: step >= 2 && BIDS.length ? 1 : 0, transform: step >= 2 ? "none" : "translateX(12px)" }}>
               <p className="font-mono text-[clamp(8px,0.9vw,11px)] uppercase tracking-[0.08em] text-[#6f6b62]">{step >= 3 ? "Bids opened" : "Bids sealed"}</p>
               {BIDS.map((b) => (
-                <p key={b.who} className={`mt-[6%] flex justify-between font-mono text-[clamp(9px,1.05vw,13px)] ${step >= 3 && b.bid === 88 ? "text-[#ffb01f]" : "text-[#efeae0]"}`}>
-                  <span>{b.who}</span><span>{step >= 3 ? `$${b.bid}` : "••••"}</span>
+                <p key={b.who} className={`mt-[6%] flex justify-between font-mono text-[clamp(9px,1.05vw,13px)] ${step >= 3 && b.top ? "text-[#ffb01f]" : "text-[#efeae0]"}`}>
+                  <span>{b.who}</span><span>{step >= 3 ? usd(b.bid) : "••••"}</span>
                 </p>
               ))}
             </div>
@@ -87,7 +86,7 @@ export function Story() {
 
           {/* Text */}
           <div className="flex min-h-0 flex-col">
-            <p className="label num text-ink-3"><span className="text-ink">{pad2(step + 1)}</span> / {pad2(STEPS.length)} · how a round works</p>
+            <p className="label num text-ink-3"><span className="text-ink">{pad2(step + 1)}</span> / {pad2(STEPS.length)} · how a round works{real && <> · replaying <a className="ulink" href={`/live/${real.id}`}>unit {pad2(real.id)}</a> from devnet</>}</p>
             <div className="relative mt-4 min-h-[250px] sm:min-h-[300px]">
               {STEPS.map((s, i) => (
                 <div key={s.title} className={`${T} absolute inset-0`} style={{ opacity: i === step ? 1 : 0, transform: i === step ? "none" : `translateY(${i < step ? -14 : 14}px)`, pointerEvents: i === step ? "auto" : "none" }} aria-hidden={i !== step}>

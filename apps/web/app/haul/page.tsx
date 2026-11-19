@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
-import { HaulShelf } from "@/components/haul-shelf";
+import { HaulView } from "@/components/haul";
 
-export const metadata: Metadata = { title: "My haul", description: "Everything you have pulled out of a unit, and what you paid for it." };
+export const metadata: Metadata = { title: "My haul", description: "The units you opened and the items in your wallet, read from Solana devnet." };
 
 export default function HaulPage() {
   return (
     <div className="wrap pb-28 pt-28 md:pt-36">
-      <p className="label text-ink-2">Practice record · saved in this browser only</p>
+      <p className="label flex items-center gap-2.5 text-ink-2"><span className="inline-block h-2 w-2 bg-accent" aria-hidden />Read from Solana devnet for your connected wallet</p>
       <h1 className="display mt-4 text-[clamp(64px,9vw,136px)]">My haul</h1>
-      <div className="mt-10"><HaulShelf /></div>
+      <div className="mt-10"><HaulView /></div>
     </div>
   );
 }

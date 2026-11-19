@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Hero } from "@/components/landing/hero";
 import { Story } from "@/components/landing/story";
-import { UnitStage } from "@/components/unit-stage";
+import { LiveCorridor } from "@/components/live/live-corridor";
 import { MAGICBLOCK, PROGRAM_ID, explorer } from "@/lib/config";
 
 const CHECKS = [
@@ -13,9 +13,10 @@ const CHECKS = [
 ];
 
 const TODAY = [
-  "Two house bidders join every live unit so there is always someone to beat. They are run by us and bid from the three public clues only. That rule is in our code, not enforced by the chain.",
+  "Two house bidders join every unit so there is always someone to beat. They are run by us and bid from the three public clues only. That rule is in our code, not enforced by the chain.",
   "Each unit's operator knows a secret salt, so the operator can work out the contents early. The operator can't choose them: the random draw arrives after the salt is locked in, and the salt is published when the unit closes.",
   "Rounds move only while someone has the site open. The keeper that locks, opens and settles units is driven by visits to the yard.",
+  "Test dollars are the yard's own token on devnet, with an open faucet. They are not Circle's USDC.",
 ];
 const ON_CHAIN = [
   "It is devnet only. Items and dollars are test tokens with no real value.",
@@ -100,12 +101,12 @@ export default function Home() {
       <section id="try" className="border-b border-line">
         <div className="wrap py-24 md:py-32">
           <div className="mb-12 grid gap-6 lg:grid-cols-[1fr_1fr] lg:items-end">
-            <h2 className="display reveal text-[clamp(48px,7vw,112px)]">Try a round</h2>
+            <h2 className="display reveal text-[clamp(48px,7vw,112px)]">Pick a door</h2>
             <p className="reveal max-w-[520px] text-[17px] text-ink-2 lg:justify-self-end">
-              This one is practice: no wallet, no chain, instant rounds. The live doors on Solana are in the yard.
+              These are the units on Solana devnet right now. Connect any Solana wallet, claim 500 test dollars and line up. A round takes about two minutes.
             </p>
           </div>
-          <UnitStage unitId={7} heading="h3" />
+          <LiveCorridor />
         </div>
       </section>
 

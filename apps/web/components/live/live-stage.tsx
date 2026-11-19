@@ -8,8 +8,7 @@ import type { ChainUnit } from "@/lib/chain/types";
 import { explorer } from "@/lib/config";
 import { clock, pad2, short, usd } from "@/lib/format";
 import { sfx } from "@/lib/sound";
-import { CATALOG } from "@/lib/yard/catalog";
-import { useNow } from "@/lib/yard/sim";
+import { useNow } from "@/lib/hooks";
 import { paintFor } from "./live-corridor";
 import { WalletBar } from "./wallet-bar";
 
@@ -88,7 +87,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const closed = unit.status === "closed";
   const won = closed && unit.winner === me;
   const clues = unit.clues.map(clueText);
-  const lots = closed ? unit.lots.map((l) => ({ item: CATALOG.find((c) => c.id === l.id) ?? CATALOG[0], qty: l.qty })) : null;
+  const lots = closed ? unit.lots : null;
   const onFound = (i: number) => setFound((f) => { if (f[i]) return f; sfx.clue(); const n = [...f]; n[i] = true; return n; });
   const maxBid = mine ? mine.deposit : 0;
 
@@ -181,7 +180,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
               </div>
               <input type="range" className="bid mt-1" min={unit.minBid} max={maxBid} value={Math.min(maxBid, Math.max(unit.minBid, amount))} onChange={(e) => setAmount(Number(e.target.value))} aria-label="Bid amount" />
               <button type="submit" className="btn btn-primary mt-4 w-full" disabled={!!p.busy || amount < unit.minBid || amount > maxBid}>{p.busy ?? "Seal my bid"} {!p.busy && <span className="arrow" aria-hidden>→</span>}</button>
-              <p className="mt-3 text-sm text-ink-2">Your bid goes to MagicBlock's private rollup. Nobody else can read it until the door opens.{!p.isQuick && " Your wallet will ask for one signature to open the rollup, then one for the bid."}</p>
+              <p className="mt-3 text-sm text-ink-2">Your bid goes to MagicBlock's private rollup. Nobody else can read it until the door opens.{!p.isQuick && " Your wallet will ask you to sign a message to open the rollup, then to approve the bid."}</p>
             </form>
           )}
 

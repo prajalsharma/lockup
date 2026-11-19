@@ -2,7 +2,7 @@
 import NumberFlow from "@number-flow/react";
 import { useEffect, useState } from "react";
 import { DEVNET_RPC, PROGRAM_ID, explorer } from "@/lib/config";
-import { CATALOG } from "@/lib/yard/catalog";
+import yardFile from "@/lib/chain/yard.json";
 import { useChainYard } from "@/components/chain-rounds";
 
 function useSlot() {
@@ -28,7 +28,7 @@ const Diamond = () => <span className="hidden text-ink-3 sm:inline" aria-hidden>
 
 export function Facts() {
   const { slot, failed } = useSlot();
-  const chain = useChainYard();
+  const chain = useChainYard(15000);
   return (
     <dl className="label flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line pt-5 text-ink-2">
       <div className="flex gap-2">
@@ -40,9 +40,9 @@ export function Facts() {
         </dd>
       </div>
       <Diamond />
-      <div className="flex gap-2"><dt className="text-ink-3">Units settled on chain</dt><dd className="num text-ink">{chain.data ? <a className="ulink" href="/yard#onchain"><NumberFlow value={chain.data.settled} /></a> : chain.failed ? "devnet not answering" : "reading devnet"}</dd></div>
+      <div className="flex gap-2"><dt className="text-ink-3">Units created on chain</dt><dd className="num text-ink">{chain.data ? <a className="ulink" href="/yard#onchain"><NumberFlow value={chain.data.unitCount} /></a> : chain.failed ? "devnet not answering" : "reading devnet"}</dd></div>
       <Diamond />
-      <div className="flex gap-2"><dt className="text-ink-3">Items in the catalog</dt><dd className="num text-ink">{CATALOG.length}</dd></div>
+      <div className="flex gap-2"><dt className="text-ink-3">Items in the catalog</dt><dd className="num text-ink">{yardFile.items.length}</dd></div>
       <Diamond />
       <div className="flex gap-2">
         <dt className="text-ink-3">Program</dt>

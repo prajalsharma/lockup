@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { setSound, soundEnabled, sfx } from "@/lib/sound";
+import { ConnectButton } from "./wallet-ui";
 
 const LINKS = [
   { href: "/yard", label: "The yard" },
@@ -91,7 +92,7 @@ export function SiteHeader() {
                 : <g stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="3" fill="currentColor" /><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M3 13l1.4-1.4M11.6 4.4L13 3" /></g>}
             </svg>
           </IconButton>
-          <Link href="/yard" className="btn btn-primary btn-sm hidden sm:inline-flex">Enter the yard</Link>
+          <ConnectButton />
           <button type="button" className="grid h-9 w-9 place-items-center rounded-lg border border-line md:hidden" aria-label="Menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
             <svg width="16" height="16" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="1.5" aria-hidden>
               {menu ? <path d="M3 3l10 10M13 3L3 13" /> : <path d="M2 5h12M2 11h12" />}

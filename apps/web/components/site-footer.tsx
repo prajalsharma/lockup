@@ -9,7 +9,7 @@ export function SiteFooter() {
         <div>
           <Wordmark />
           <p className="mt-4 max-w-sm text-ink-2">Sealed-bid storage units on Solana. Built for Solana Blitz v10 on MagicBlock.</p>
-          <p className="label mt-6 text-ink-3">Test network. Nothing here is worth real money.</p>
+          <p className="label mt-6 text-ink-3">Solana devnet. Nothing here is worth real money.</p>
         </div>
         <div>
           <p className="label text-ink-3">Play</p>

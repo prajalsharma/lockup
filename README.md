@@ -9,6 +9,10 @@ MagicBlock's private rollup, and the highest bid rolls the door up.
 - **Program (devnet):** [`2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR`](https://explorer.solana.com/address/2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR?cluster=devnet)
 - **How it works and what is trusted:** [`docs/CONTRACTS.md`](docs/CONTRACTS.md)
 
+Everything on the site is read from or written to Solana devnet. There is no simulated mode: units, deposits,
+bids, results and the items in "My haul" are all on-chain accounts and SPL token balances. The bid currency
+is the yard's own devnet token with an open faucet.
+
 ## MagicBlock features used
 
 | Feature | Where |
@@ -33,7 +37,7 @@ whenever someone has the yard open. It needs `KEEPER_SECRET` (a devnet keypair a
 ## Layout
 
 - `programs/lockup` Anchor program; `src/engine.rs` holds the pure game rules and their tests
-- `apps/web` Next.js 15 site: 3D door, live yard, practice yard
+- `apps/web` Next.js 15 site: 3D door, live yard, wallet connect (Solana Wallet Adapter), keeper
 - `scripts` devnet setup, end-to-end round, local keeper
 - `docs/screens` screenshots
 

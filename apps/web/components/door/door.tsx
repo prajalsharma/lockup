@@ -1,7 +1,7 @@
 "use client";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
-import type { Lot } from "@/lib/yard/types";
+import type { DoorLot } from "@/lib/chain/types";
 import { pad2 } from "@/lib/format";
 
 const DoorScene = dynamic(() => import("./door-scene"), { ssr: false });
@@ -25,7 +25,7 @@ interface Props {
   found: boolean[];
   onFound?: (i: number) => void;
   open: boolean;
-  contents?: Lot[] | null;
+  contents?: DoorLot[] | null;
   attract?: boolean;
   className?: string;
   label?: string;

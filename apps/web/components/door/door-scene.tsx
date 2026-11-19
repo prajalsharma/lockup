@@ -2,7 +2,7 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import type { Lot } from "@/lib/yard/types";
+import type { DoorLot } from "@/lib/chain/types";
 import { crateTexture, fontsReady, numberTexture, tagTexture } from "./textures";
 
 const W = 3;
@@ -22,7 +22,7 @@ export interface DoorSceneProps {
   found: boolean[];
   onFound?: (index: number) => void;
   open: boolean;
-  contents?: Lot[] | null;
+  contents?: DoorLot[] | null;
   /** Play the scripted torch sweep once on mount. */
   attract?: boolean;
   active: boolean;
@@ -75,14 +75,14 @@ function Scene({ unit, paint = "#4d5560", clues, found, onFound, open, contents,
   const crates = useMemo(() => {
     if (!fonts || !contents) return [];
     return contents.slice(0, 6).map((l, i) => {
-      const s = l.item.heavy ? 1.12 : l.item.rarity === "common" ? 0.74 : 0.88;
+      const s = l.heavy ? 1.12 : l.rarity === 0 ? 0.74 : 0.88;
       const col = i % 3, row = Math.floor(i / 3);
       return {
-        key: l.item.id, size: s,
+        key: l.id, size: s,
         pos: [(col - 1) * 0.98 + (row ? 0.34 : 0), s / 2, -0.8 - row * 1.15] as [number, number, number],
         rot: ((i * 37) % 11 - 5) * 0.035,
-        tex: crateTexture(l.item.name, l.qty, l.item.rarity, fonts.mono),
-        grail: l.item.rarity === "grail",
+        tex: crateTexture(l.name, l.qty, ["common", "rare", "grail"][l.rarity] ?? "common", fonts.mono),
+        grail: l.rarity === 2,
       };
     });
   }, [fonts, contents]);

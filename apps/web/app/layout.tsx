@@ -3,6 +3,8 @@ import { Anton, Hanken_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Reveals, SmoothScroll } from "@/components/smooth-scroll";
+import { WalletPicker } from "@/components/wallet-ui";
+import { PlayerProvider } from "@/lib/chain/player";
 import { SITE_URL } from "@/lib/config";
 import "./globals.css";
 
@@ -38,9 +40,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[70] focus:rounded-lg focus:bg-accent focus:px-4 focus:py-2 focus:text-on-accent">Skip to content</a>
         <SmoothScroll />
         <Reveals />
-        <SiteHeader />
-        <main id="main">{children}</main>
-        <SiteFooter />
+        <PlayerProvider>
+          <SiteHeader />
+          <main id="main">{children}</main>
+          <SiteFooter />
+          <WalletPicker />
+        </PlayerProvider>
         <div className="grain" aria-hidden />
       </body>
     </html>

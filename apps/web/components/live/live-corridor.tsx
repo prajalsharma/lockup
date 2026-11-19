@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useChainYard } from "@/components/chain-rounds";
 import { clock, pad2, usd } from "@/lib/format";
-import { useNow } from "@/lib/yard/sim";
+import { useNow } from "@/lib/hooks";
 
 const PAINTS = ["#4d5560", "#7a3b2e", "#2f5d62", "#6b5a2a", "#3c4a6b", "#5a3f5c"];
 export const paintFor = (id: number) => PAINTS[id % PAINTS.length];
