@@ -72,6 +72,20 @@ export function WalletPicker() {
         <p className="mt-3 text-ink-2">Lockup runs on Solana devnet. You sign every deposit and bid yourself.</p>
 
         <ul className="mt-6 border-t border-line">
+          {p.emailLogin && (
+            <li className="border-b border-line">
+              <button type="button" className="group flex w-full items-center gap-4 py-4 text-left" onClick={p.useEmail}>
+                <span className="grid h-7 w-7 place-items-center rounded-md bg-ink text-ground" aria-hidden>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="1" y="2.5" width="12" height="9" rx="1" /><path d="M1.5 3.5L7 8l5.5-4.5" /></svg>
+                </span>
+                <span>
+                  <span className="block text-[17px] font-semibold">Email or Google</span>
+                  <span className="block text-sm text-ink-2">Sign in and get a wallet made for you.</span>
+                </span>
+                <span className="label ml-auto text-ink-3 transition-colors group-hover:text-ink">No install</span>
+              </button>
+            </li>
+          )}
           {p.choices.map((c, i) => (
             <li key={c.name} className="border-b border-line">
               <button ref={i === 0 ? first : undefined} type="button" className="group flex w-full items-center gap-4 py-4 text-left" onClick={() => p.useExtension(c.name)}>
@@ -94,7 +108,7 @@ export function WalletPicker() {
             </button>
           </li>
         </ul>
-        {p.choices.length === 0 && <p className="mt-4 text-sm text-ink-2">No wallet extension found in this browser. Install Phantom, Solflare or Backpack, or use the quick wallet.</p>}
+        {p.choices.length === 0 && <p className="mt-4 text-sm text-ink-2">No wallet extension found in this browser. Install Phantom, Solflare or Backpack, or pick another option above.</p>}
         {p.error && <p role="alert" className="mt-4 text-sm text-bad">{p.error}</p>}
         <p className="mt-5 text-sm text-ink-3">New wallets get a little devnet SOL for fees and can claim 500 test dollars. Nothing here has real value.</p>
       </div>

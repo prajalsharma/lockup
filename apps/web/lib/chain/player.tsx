@@ -11,11 +11,13 @@ import { ConnectionProvider, WalletProvider, useWallet } from "@solana/wallet-ad
 import { TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import nacl from "tweetnacl";
+import dynamic from "next/dynamic";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { EmailWalletCtx, PRIVY_APP_ID } from "./email-wallet";
 import { BID_MINT, RPC, TEE_RPC, USD, VAULT, YARD, bidPda, bidderPda, sleep, tapPda, unitPda } from "./shared";
 
 interface Signer {
-  kind: "quick" | "extension";
+  kind: "quick" | "extension" | "email";
   name: string;
   icon?: string;
   publicKey: PublicKey;
@@ -58,6 +60,9 @@ interface PlayerState {
   myBids: Record<number, number>;
   openPicker(): void;
   closePicker(): void;
+  /** True when email / Google sign-in is configured. */
+  emailLogin: boolean;
+  useEmail(): void;
   useQuick(): void;
   useExtension(name: string): void;
   disconnect(): void;
@@ -97,7 +102,8 @@ async function chainKit() {
 
 function Inner({ children }: { children: React.ReactNode }) {
   const adapter = useWallet();
-  const [mode, setMode] = useState<"quick" | "extension" | null>(null);
+  const email = useContext(EmailWalletCtx);
+  const [mode, setMode] = useState<"quick" | "extension" | "email" | null>(null);
   const [quick, setQuick] = useState<Signer | null>(null);
   const [ready, setReady] = useState(false);
   const [sol, setSol] = useState<number | null>(null);
@@ -114,6 +120,7 @@ function Inner({ children }: { children: React.ReactNode }) {
       const m = localStorage.getItem(MODE_KEY);
       if (m === "quick" && localStorage.getItem(QUICK_KEY)) { setQuick(quickSigner()); setMode("quick"); }
       if (m === "extension") setMode("extension");
+      if (m === "email") setMode("email");
       setMyBids(JSON.parse(sessionStorage.getItem("lockup.my-bids") || "{}"));
     } catch { /* storage blocked */ }
     setReady(true);
@@ -135,8 +142,16 @@ function Inner({ children }: { children: React.ReactNode }) {
         },
       };
     }
+    if (mode === "email" && email?.address) {
+      const e = email;
+      return {
+        kind: "email", name: "Email wallet", publicKey: new PublicKey(e.address!),
+        signTransaction: async (tx) => Transaction.from(await e.signTransaction(tx.serialize({ requireAllSignatures: false, verifySignatures: false }))),
+        signMessage: (m) => e.signMessage(m),
+      };
+    }
     return null;
-  }, [mode, quick, adapter]);
+  }, [mode, quick, adapter, email]);
 
   const who = signer?.publicKey.toBase58() ?? null;
 
@@ -250,7 +265,7 @@ function Inner({ children }: { children: React.ReactNode }) {
     });
   }), [run, send]);
 
-  const remember = (m: "quick" | "extension" | null) => {
+  const remember = (m: "quick" | "extension" | "email" | null) => {
     try { if (m) localStorage.setItem(MODE_KEY, m); else localStorage.removeItem(MODE_KEY); } catch { /* ignore */ }
     setMode(m);
   };
@@ -269,10 +284,12 @@ function Inner({ children }: { children: React.ReactNode }) {
   useEffect(() => { if (mode === "extension" && adapter.connected) setPickerOpen(false); }, [mode, adapter.connected]);
 
   const value: PlayerState = {
-    ready, address: who, walletName: signer?.name ?? null, walletIcon: signer?.icon ?? null, isQuick: signer?.kind === "quick",
+    ready: ready && (mode !== "email" || !email || email.ready), address: who, walletName: signer?.name ?? null, walletIcon: signer?.icon ?? null, isQuick: signer?.kind === "quick",
     connecting: adapter.connecting, sol, dollars, choices, pickerOpen, busy, error, myBids,
     openPicker: () => { setError(null); setPickerOpen(true); },
     closePicker: () => setPickerOpen(false),
+    emailLogin: !!email,
+    useEmail: () => { setError(null); remember("email"); setPickerOpen(false); if (email && !email.authenticated) email.login(); },
     useQuick: () => { setError(null); setQuick(quickSigner()); remember("quick"); setPickerOpen(false); },
     useExtension: (name) => {
       setError(null);
@@ -284,6 +301,7 @@ function Inner({ children }: { children: React.ReactNode }) {
     disconnect: () => {
       teeConn.current = null;
       if (mode === "extension") void adapter.disconnect().catch(() => undefined);
+      if (mode === "email") void email?.logout().catch(() => undefined);
       remember(null);
     },
     join, bid, topUp,
@@ -292,14 +310,22 @@ function Inner({ children }: { children: React.ReactNode }) {
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
+const PrivyBridge = dynamic(() => import("./privy"));
+/** Email sign-in is only mounted when a Privy app is configured; otherwise its code is never loaded. */
+function EmailLayer({ children }: { children: React.ReactNode }) {
+  return PRIVY_APP_ID ? <PrivyBridge>{children}</PrivyBridge> : <>{children}</>;
+}
+
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   // An empty list is deliberate: the provider finds every installed wallet through the wallet standard.
   const wallets = useMemo(() => [], []);
   return (
-    <ConnectionProvider endpoint={RPC}>
-      <WalletProvider wallets={wallets} autoConnect>
-        <Inner>{children}</Inner>
-      </WalletProvider>
-    </ConnectionProvider>
+    <EmailLayer>
+      <ConnectionProvider endpoint={RPC}>
+        <WalletProvider wallets={wallets} autoConnect>
+          <Inner>{children}</Inner>
+        </WalletProvider>
+      </ConnectionProvider>
+    </EmailLayer>
   );
 }

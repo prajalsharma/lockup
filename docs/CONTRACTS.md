@@ -42,5 +42,7 @@ Pins: `anchor-lang 1.0.2`, `ephemeral-rollups-sdk 0.16.2` (features `anchor`, `a
 
 `pnpm round` drives a whole round with two wallets and asserts every step, including the privacy
 reads and exact settlement amounts. The hosted site has also been played end to end with the in-browser
-quick wallet. Wallet extensions connect through Solana Wallet Adapter and use the same signing path,
-but have not been exercised with a real extension.
+quick wallet. Wallet extensions connect through Solana Wallet Adapter. That path has been played end to end on the
+hosted site with an injected wallet implementing the Wallet Standard interface (connect, signTransaction,
+signMessage); a real Phantom, Solflare or Backpack install has not been driven. Email sign-in through
+Privy is wired but has not been run, because it needs an App ID.

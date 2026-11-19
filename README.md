@@ -32,6 +32,7 @@ pnpm round               # one full round on devnet, every step asserted
 
 Rounds on the hosted site are moved along by a keeper (`apps/web/lib/chain/keeper.ts`) that runs
 whenever someone has the yard open. It needs `KEEPER_SECRET` (a devnet keypair as a JSON array).
+Set `NEXT_PUBLIC_PRIVY_APP_ID` to add email and Google sign-in (Privy) to the wallet picker.
 `npx tsx scripts/keeper.ts` runs the same loop locally.
 
 ## Layout
