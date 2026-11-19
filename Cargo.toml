@@ -1,0 +1,17 @@
+[workspace]
+members = ["programs/*"]
+resolver = "2"
+
+[profile.release]
+# overflow-checks stays on. It is a safety property of the auction arithmetic, not a size
+# knob, and must never be traded away for a smaller binary. (Note: `strip` was tried here
+# and changed nothing — the SBF toolchain already strips symbols.)
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+opt-level = "z"
+
+[profile.release.build-override]
+opt-level = 3
+incremental = false
+codegen-units = 1

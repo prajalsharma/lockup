@@ -1,0 +1,2869 @@
+{
+  "address": "2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR",
+  "metadata": {
+    "name": "lockup",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "LOCKUP - sealed-bid storage units on Solana + MagicBlock"
+  },
+  "instructions": [
+    {
+      "name": "add_item",
+      "docs": [
+        "Add one item type to the catalog and open its warehouse token account."
+      ],
+      "discriminator": [
+        225,
+        38,
+        79,
+        147,
+        116,
+        142,
+        147,
+        57
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "yard"
+          ]
+        },
+        {
+          "name": "yard",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard.yard_id",
+                "account": "Yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "item_mint"
+        },
+        {
+          "name": "warehouse",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  114,
+                  101,
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "item_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "value",
+          "type": "u32"
+        },
+        {
+          "name": "weight",
+          "type": "u16"
+        },
+        {
+          "name": "rarity",
+          "type": "u8"
+        },
+        {
+          "name": "group",
+          "type": "u8"
+        },
+        {
+          "name": "heavy",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "claim_lot",
+      "docs": [
+        "Move one lot of the contents from the warehouse to the winner. Anyone can run it."
+      ],
+      "discriminator": [
+        62,
+        3,
+        22,
+        211,
+        183,
+        181,
+        148,
+        176
+      ],
+      "accounts": [
+        {
+          "name": "crank",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "yard",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard.yard_id",
+                "account": "Yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bidder_record",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  105,
+                  100,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              },
+              {
+                "kind": "account",
+                "path": "unit.winner",
+                "account": "Unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "item_mint"
+        },
+        {
+          "name": "warehouse",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  114,
+                  101,
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "item_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "winner_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "lot_index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "close_unit",
+      "docs": [
+        "Read every sealed bid at once, pick the winner, and write bids, contents and salt into",
+        "the unit so they travel to Solana with the commit.",
+        "",
+        "`remaining_accounts` = the manifest, then every bid. Each is checked to be the PDA",
+        "this program derives, so nobody can pass a forged bid or a different manifest."
+      ],
+      "discriminator": [
+        236,
+        66,
+        63,
+        195,
+        90,
+        249,
+        7,
+        69
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "unit"
+          ]
+        },
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit.yard",
+                "account": "Unit"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "commit_unit",
+      "docs": [
+        "Commit the closed unit to Solana and release it from the rollup.",
+        "",
+        "Must not modify the unit: `commit_and_undelegate` hands the account to the Magic",
+        "program inside this instruction, so any write (including Anchor's exit write on a",
+        "typed `mut` account) is rejected. Hence `UncheckedAccount` and hand validation."
+      ],
+      "discriminator": [
+        214,
+        145,
+        150,
+        251,
+        232,
+        97,
+        85,
+        97
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "unit",
+          "writable": true
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        },
+        {
+          "name": "magic_context",
+          "writable": true,
+          "address": "MagicContext1111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_unit",
+      "docs": [
+        "Open a unit. `salt_commit` is sha256 of a salt the operator keeps until close."
+      ],
+      "discriminator": [
+        90,
+        97,
+        184,
+        85,
+        196,
+        155,
+        100,
+        152
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "yard"
+          ]
+        },
+        {
+          "name": "yard",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard.yard_id",
+                "account": "Yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "arg",
+                "path": "unit_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "unit_id",
+          "type": "u64"
+        },
+        {
+          "name": "duration",
+          "type": "i64"
+        },
+        {
+          "name": "min_bid",
+          "type": "u64"
+        },
+        {
+          "name": "salt_commit",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "delegate_unit",
+      "docs": [
+        "Hand the unit to the private rollup's validator for the bidding phase."
+      ],
+      "discriminator": [
+        215,
+        215,
+        47,
+        49,
+        111,
+        11,
+        32,
+        225
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "yard",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard.yard_id",
+                "account": "Yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buffer_unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                25,
+                105,
+                62,
+                73,
+                101,
+                55,
+                228,
+                2,
+                36,
+                239,
+                108,
+                145,
+                174,
+                20,
+                151,
+                76,
+                220,
+                172,
+                57,
+                164,
+                4,
+                206,
+                151,
+                26,
+                246,
+                197,
+                248,
+                246,
+                59,
+                158,
+                133,
+                244
+              ]
+            }
+          }
+        },
+        {
+          "name": "delegation_record_unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "delegation_metadata_unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  45,
+                  109,
+                  101,
+                  116,
+                  97,
+                  100,
+                  97,
+                  116,
+                  97
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              }
+            ],
+            "program": {
+              "kind": "account",
+              "path": "delegation_program"
+            }
+          }
+        },
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "arg",
+                "path": "unit_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "validator",
+          "optional": true
+        },
+        {
+          "name": "owner_program",
+          "address": "2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR"
+        },
+        {
+          "name": "delegation_program",
+          "address": "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "unit_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "draw_callback",
+      "docs": [
+        "Called by the VRF program only. Stores the randomness and opens the line."
+      ],
+      "discriminator": [
+        126,
+        49,
+        233,
+        52,
+        8,
+        16,
+        174,
+        172
+      ],
+      "accounts": [
+        {
+          "name": "vrf_program_identity",
+          "docs": [
+            "Scoped VRF identity PDA, bound to this program. Its presence as a signer proves",
+            "the callback was issued by the VRF program for this program."
+          ],
+          "signer": true
+        },
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit.yard",
+                "account": "Unit"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "faucet",
+      "docs": [
+        "Mint test dollars to the caller. Devnet only; the mint has no value."
+      ],
+      "discriminator": [
+        0,
+        98,
+        59,
+        30,
+        144,
+        142,
+        113,
+        12
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "yard",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard.yard_id",
+                "account": "Yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bid_mint",
+          "writable": true
+        },
+        {
+          "name": "user_token_account",
+          "writable": true
+        },
+        {
+          "name": "tap",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  97,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "init_unit_permission",
+      "docs": [
+        "The unit itself is public on the rollup: clock, clues and who is in line."
+      ],
+      "discriminator": [
+        114,
+        33,
+        29,
+        33,
+        90,
+        255,
+        169,
+        94
+      ],
+      "accounts": [
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit.yard",
+                "account": "Unit"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  101,
+                  114,
+                  109,
+                  105,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110,
+                  58
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                136,
+                161,
+                10,
+                196,
+                33,
+                152,
+                1,
+                214,
+                246,
+                106,
+                29,
+                60,
+                6,
+                152,
+                192,
+                102,
+                169,
+                175,
+                212,
+                217,
+                180,
+                252,
+                231,
+                71,
+                151,
+                141,
+                209,
+                5,
+                168,
+                212,
+                103,
+                82
+              ]
+            }
+          }
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        },
+        {
+          "name": "ephemeral_vault",
+          "writable": true,
+          "address": "MagicVau1t999999999999999999999999999999999"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "init_yard",
+      "docs": [
+        "Create a yard, its deposit vault, and take over the test-dollar mint for the faucet."
+      ],
+      "discriminator": [
+        134,
+        85,
+        72,
+        116,
+        226,
+        246,
+        253,
+        11
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "yard",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "yard_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bid_mint",
+          "docs": [
+            "Its mint authority must already be the yard PDA so the faucet works."
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "yard_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "join_unit",
+      "docs": [
+        "Get in line: escrow a deposit on Solana. The deposit is public and caps your bid."
+      ],
+      "discriminator": [
+        94,
+        219,
+        133,
+        236,
+        133,
+        183,
+        47,
+        22
+      ],
+      "accounts": [
+        {
+          "name": "bidder",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "yard",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard.yard_id",
+                "account": "Yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bidder_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  105,
+                  100,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              },
+              {
+                "kind": "account",
+                "path": "bidder"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bidder_token_account",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "deposit",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "place_bid",
+      "docs": [
+        "Place a bid. Send `seal_bid` in the same transaction."
+      ],
+      "discriminator": [
+        238,
+        77,
+        148,
+        91,
+        200,
+        151,
+        92,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "bidder",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit.yard",
+                "account": "Unit"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bid",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  105,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              },
+              {
+                "kind": "account",
+                "path": "bidder"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "address": "MagicVau1t999999999999999999999999999999999"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "process_undelegation",
+      "discriminator": [
+        196,
+        28,
+        41,
+        206,
+        48,
+        37,
+        51,
+        167
+      ],
+      "accounts": [
+        {
+          "name": "base_account",
+          "writable": true
+        },
+        {
+          "name": "buffer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  101,
+                  45,
+                  98,
+                  117,
+                  102,
+                  102,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "base_account"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                181,
+                183,
+                0,
+                225,
+                242,
+                87,
+                58,
+                192,
+                204,
+                6,
+                34,
+                1,
+                52,
+                74,
+                207,
+                151,
+                184,
+                53,
+                6,
+                235,
+                140,
+                229,
+                25,
+                152,
+                204,
+                98,
+                126,
+                24,
+                147,
+                128,
+                167,
+                62
+              ]
+            }
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "account_seeds",
+          "type": {
+            "vec": "bytes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "reclaim_stalled",
+      "docs": [
+        "Escape hatch: an hour after joining, if the unit has no result on Solana, take the",
+        "whole deposit back. Works even while the unit is still held by the rollup."
+      ],
+      "discriminator": [
+        16,
+        163,
+        178,
+        220,
+        154,
+        142,
+        134,
+        97
+      ],
+      "accounts": [
+        {
+          "name": "bidder",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "yard",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard.yard_id",
+                "account": "Yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "unit",
+          "docs": [
+            "bidder record by address; the record names its yard."
+          ]
+        },
+        {
+          "name": "bidder_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  105,
+                  100,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              },
+              {
+                "kind": "account",
+                "path": "bidder"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bidder_token_account",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "request_draw",
+      "docs": [
+        "Ask MagicBlock VRF for the unit's randomness."
+      ],
+      "discriminator": [
+        22,
+        180,
+        8,
+        81,
+        47,
+        21,
+        86,
+        159
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "unit"
+          ]
+        },
+        {
+          "name": "unit",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit.yard",
+                "account": "Unit"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "seal_bid",
+      "docs": [
+        "Make a bid private: only its bidder can read it. Not even the operator."
+      ],
+      "discriminator": [
+        190,
+        81,
+        234,
+        248,
+        112,
+        223,
+        29,
+        176
+      ],
+      "accounts": [
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit.yard",
+                "account": "Unit"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bid",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  105,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              },
+              {
+                "kind": "account",
+                "path": "bid.bidder",
+                "account": "Bid"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  101,
+                  114,
+                  109,
+                  105,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110,
+                  58
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bid"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                136,
+                161,
+                10,
+                196,
+                33,
+                152,
+                1,
+                214,
+                246,
+                106,
+                29,
+                60,
+                6,
+                152,
+                192,
+                102,
+                169,
+                175,
+                212,
+                217,
+                180,
+                252,
+                231,
+                71,
+                151,
+                141,
+                209,
+                5,
+                168,
+                212,
+                103,
+                82
+              ]
+            }
+          }
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        },
+        {
+          "name": "ephemeral_vault",
+          "writable": true,
+          "address": "MagicVau1t999999999999999999999999999999999"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "seal_manifest",
+      "docs": [
+        "Make the manifest private: only the operator, who already knows the salt, can read it."
+      ],
+      "discriminator": [
+        231,
+        9,
+        130,
+        138,
+        225,
+        67,
+        241,
+        223
+      ],
+      "accounts": [
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit.yard",
+                "account": "Unit"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "manifest",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  110,
+                  105,
+                  102,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  101,
+                  114,
+                  109,
+                  105,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110,
+                  58
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "manifest"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                136,
+                161,
+                10,
+                196,
+                33,
+                152,
+                1,
+                214,
+                246,
+                106,
+                29,
+                60,
+                6,
+                152,
+                192,
+                102,
+                169,
+                175,
+                212,
+                217,
+                180,
+                252,
+                231,
+                71,
+                151,
+                141,
+                209,
+                5,
+                168,
+                212,
+                103,
+                82
+              ]
+            }
+          }
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        },
+        {
+          "name": "ephemeral_vault",
+          "writable": true,
+          "address": "MagicVau1t999999999999999999999999999999999"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "settle_bidder",
+      "docs": [
+        "Pay one bidder what they are owed. Anyone can run it: the numbers come from the unit.",
+        "The winner gets their deposit minus the winning bid. Everyone else gets it all back."
+      ],
+      "discriminator": [
+        240,
+        160,
+        123,
+        185,
+        101,
+        203,
+        207,
+        225
+      ],
+      "accounts": [
+        {
+          "name": "crank",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "yard",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard.yard_id",
+                "account": "Yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "unit",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bidder_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  105,
+                  100,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              },
+              {
+                "kind": "account",
+                "path": "bidder_record.bidder",
+                "account": "Bidder"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bidder_token_account",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "start_unit",
+      "docs": [
+        "Close the line and start the clock. Runs just before delegation."
+      ],
+      "discriminator": [
+        105,
+        29,
+        46,
+        154,
+        12,
+        71,
+        67,
+        248
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "unit"
+          ]
+        },
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit.yard",
+                "account": "Unit"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "stock_unit",
+      "docs": [
+        "Derive the contents from randomness + salt, hide them in a manifest, post three clues.",
+        "Send `seal_manifest` in the same transaction."
+      ],
+      "discriminator": [
+        210,
+        114,
+        242,
+        169,
+        151,
+        222,
+        22,
+        211
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "unit"
+          ]
+        },
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit.yard",
+                "account": "Unit"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "manifest",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  110,
+                  105,
+                  102,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "address": "MagicVau1t999999999999999999999999999999999"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "salt",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Bid",
+      "discriminator": [
+        143,
+        246,
+        48,
+        245,
+        42,
+        145,
+        180,
+        88
+      ]
+    },
+    {
+      "name": "Bidder",
+      "discriminator": [
+        16,
+        15,
+        198,
+        59,
+        68,
+        183,
+        204,
+        116
+      ]
+    },
+    {
+      "name": "Manifest",
+      "discriminator": [
+        139,
+        55,
+        191,
+        180,
+        10,
+        101,
+        100,
+        40
+      ]
+    },
+    {
+      "name": "Tap",
+      "discriminator": [
+        127,
+        132,
+        109,
+        96,
+        218,
+        58,
+        203,
+        204
+      ]
+    },
+    {
+      "name": "Unit",
+      "discriminator": [
+        9,
+        229,
+        70,
+        148,
+        112,
+        136,
+        194,
+        16
+      ]
+    },
+    {
+      "name": "Yard",
+      "discriminator": [
+        151,
+        65,
+        242,
+        6,
+        113,
+        154,
+        31,
+        97
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Only the yard authority can do this"
+    },
+    {
+      "code": 6001,
+      "name": "CatalogFull",
+      "msg": "The catalog is full"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidItem",
+      "msg": "Bad item settings"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidDuration",
+      "msg": "Duration is out of range"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidMinBid",
+      "msg": "Minimum bid must be above zero"
+    },
+    {
+      "code": 6005,
+      "name": "WrongStatus",
+      "msg": "The unit is not in the right state for this"
+    },
+    {
+      "code": 6006,
+      "name": "UnitFull",
+      "msg": "The unit is full"
+    },
+    {
+      "code": 6007,
+      "name": "AlreadyJoined",
+      "msg": "This wallet already joined the unit"
+    },
+    {
+      "code": 6008,
+      "name": "DepositTooSmall",
+      "msg": "Deposit is below the minimum bid"
+    },
+    {
+      "code": 6009,
+      "name": "NotInLine",
+      "msg": "This wallet is not in line for the unit"
+    },
+    {
+      "code": 6010,
+      "name": "BidTooLow",
+      "msg": "Bid is below the minimum"
+    },
+    {
+      "code": 6011,
+      "name": "BidAboveDeposit",
+      "msg": "Bid is above your deposit"
+    },
+    {
+      "code": 6012,
+      "name": "AlreadyBid",
+      "msg": "This wallet already bid"
+    },
+    {
+      "code": 6013,
+      "name": "BiddingClosed",
+      "msg": "Bidding has closed"
+    },
+    {
+      "code": 6014,
+      "name": "BiddingStillOpen",
+      "msg": "Bidding is still open"
+    },
+    {
+      "code": 6015,
+      "name": "NotStocked",
+      "msg": "The unit has not been stocked yet"
+    },
+    {
+      "code": 6016,
+      "name": "AlreadyStocked",
+      "msg": "The unit is already stocked"
+    },
+    {
+      "code": 6017,
+      "name": "BadSalt",
+      "msg": "Salt does not match the commitment"
+    },
+    {
+      "code": 6018,
+      "name": "InvalidAccount",
+      "msg": "Wrong account passed in"
+    },
+    {
+      "code": 6019,
+      "name": "BidCountMismatch",
+      "msg": "Wrong number of bid accounts"
+    },
+    {
+      "code": 6020,
+      "name": "DuplicateBid",
+      "msg": "The same bid account was passed twice"
+    },
+    {
+      "code": 6021,
+      "name": "AlreadySettled",
+      "msg": "Already settled"
+    },
+    {
+      "code": 6022,
+      "name": "NotWinner",
+      "msg": "Not the winner"
+    },
+    {
+      "code": 6023,
+      "name": "AlreadyClaimed",
+      "msg": "That lot was already claimed"
+    },
+    {
+      "code": 6024,
+      "name": "TooEarly",
+      "msg": "Too early to reclaim"
+    },
+    {
+      "code": 6025,
+      "name": "MintMismatch",
+      "msg": "Token mint does not match"
+    },
+    {
+      "code": 6026,
+      "name": "FaucetCooldown",
+      "msg": "Faucet was used recently"
+    },
+    {
+      "code": 6027,
+      "name": "Overflow",
+      "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6028,
+      "name": "StockFailed",
+      "msg": "Stocking failed"
+    }
+  ],
+  "types": [
+    {
+      "name": "Bid",
+      "docs": [
+        "A sealed bid. Exists only on the private rollup; only the bidder can read it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "unit",
+            "type": "pubkey"
+          },
+          {
+            "name": "bidder",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "order",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Bidder",
+      "docs": [
+        "One wallet's place in line for one unit. Lives on Solana and holds the escrow record."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "yard",
+            "type": "pubkey"
+          },
+          {
+            "name": "unit",
+            "type": "pubkey"
+          },
+          {
+            "name": "bidder",
+            "type": "pubkey"
+          },
+          {
+            "name": "deposit",
+            "type": "u64"
+          },
+          {
+            "name": "joined_at",
+            "type": "i64"
+          },
+          {
+            "name": "settled",
+            "type": "bool"
+          },
+          {
+            "name": "won",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Clue",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "arg",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Item",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "value",
+            "docs": [
+              "Appraised value in whole test dollars."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "weight",
+            "type": "u16"
+          },
+          {
+            "name": "rarity",
+            "type": "u8"
+          },
+          {
+            "name": "group",
+            "type": "u8"
+          },
+          {
+            "name": "heavy",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ItemFacts",
+      "docs": [
+        "The catalog facts the rollup needs to stock a unit. Copied into the unit at creation."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "value",
+            "type": "u32"
+          },
+          {
+            "name": "weight",
+            "type": "u16"
+          },
+          {
+            "name": "rarity",
+            "type": "u8"
+          },
+          {
+            "name": "group",
+            "type": "u8"
+          },
+          {
+            "name": "heavy",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Lot",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "item",
+            "type": "u8"
+          },
+          {
+            "name": "qty",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Manifest",
+      "docs": [
+        "A unit's contents. Exists only on the private rollup until the unit closes."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "unit",
+            "type": "pubkey"
+          },
+          {
+            "name": "lots",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Lot"
+                }
+              }
+            }
+          },
+          {
+            "name": "value",
+            "type": "u32"
+          },
+          {
+            "name": "salt",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Slot",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bidder",
+            "type": "pubkey"
+          },
+          {
+            "name": "deposit",
+            "docs": [
+              "Escrowed on Solana. Public. Caps the bid."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "has_bid",
+            "type": "bool"
+          },
+          {
+            "name": "bid",
+            "docs": [
+              "Zero until the unit is closed."
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Tap",
+      "docs": [
+        "Faucet cooldown per wallet."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "last",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Unit",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "yard",
+            "type": "pubkey"
+          },
+          {
+            "name": "unit_id",
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "UnitStatus"
+              }
+            }
+          },
+          {
+            "name": "min_bid",
+            "type": "u64"
+          },
+          {
+            "name": "duration",
+            "type": "i64"
+          },
+          {
+            "name": "closes_at",
+            "type": "i64"
+          },
+          {
+            "name": "salt_commit",
+            "docs": [
+              "sha256(salt). The salt stays with the operator until the unit closes."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "randomness",
+            "docs": [
+              "From MagicBlock VRF. Public, and useless without the salt."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "stocked",
+            "type": "bool"
+          },
+          {
+            "name": "clues",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Clue"
+                  }
+                },
+                3
+              ]
+            }
+          },
+          {
+            "name": "bid_count",
+            "type": "u8"
+          },
+          {
+            "name": "slots",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Slot"
+                }
+              }
+            }
+          },
+          {
+            "name": "catalog",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "ItemFacts"
+                }
+              }
+            }
+          },
+          {
+            "name": "winner",
+            "type": "pubkey"
+          },
+          {
+            "name": "winning_bid",
+            "type": "u64"
+          },
+          {
+            "name": "lots",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Lot"
+                }
+              }
+            }
+          },
+          {
+            "name": "value",
+            "type": "u32"
+          },
+          {
+            "name": "salt",
+            "docs": [
+              "Published at close so anyone can recompute the contents from randomness + salt."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "claimed_mask",
+            "docs": [
+              "Bit i set = lot i has been paid out to the winner."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UnitStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Created"
+          },
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Bidding"
+          },
+          {
+            "name": "Closed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Yard",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "yard_id",
+            "type": "u64"
+          },
+          {
+            "name": "bid_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "unit_count",
+            "type": "u64"
+          },
+          {
+            "name": "catalog",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Item"
+                }
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ]
+}

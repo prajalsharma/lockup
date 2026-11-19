@@ -1,0 +1,15 @@
+node_modules
+.next
+target
+.anchor
+test-ledger
+.env
+.env.local
+.reference
+*.keypair.json
+.DS_Store
+*.mp4
+*.mov
+.vercel
+.env*
+*.tsbuildinfo

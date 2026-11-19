@@ -1,0 +1,16 @@
+[toolchain]
+anchor_version = "1.0.2"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.devnet]
+lockup = "2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR"
+
+[programs.localnet]
+lockup = "2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
