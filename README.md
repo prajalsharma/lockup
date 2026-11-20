@@ -18,6 +18,18 @@ bids, results and the items in "My haul" are all on-chain accounts and SPL token
 Circle's devnet USDC (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`); stakes are cents because the yard
 runs on a small float, and each new wallet is sent 1 USDC to start.
 
+## Two ways to play
+
+- **Solo.** Two house bidders are in line on every solo unit, so one person can play a full round.
+  The door locks 15 seconds after the first player joins. Other players can join the same unit.
+- **Multiplayer.** Players only. The unit waits for a second player, with an invite link to share, and
+  locks 25 seconds after the last one joins. If a player waits alone for two minutes, one house bidder
+  takes the seat so the round still runs.
+
+The mode is public on chain: multiplayer units are created with a 90-second clock, solo units with 75.
+The landing page has an animated map of where each step happens (Solana, MagicBlock VRF, the private
+rollup), and every unit's page shows the same map pinned to where that unit is right now.
+
 ## MagicBlock features used
 
 | Feature | Where |

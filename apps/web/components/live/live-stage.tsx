@@ -1,9 +1,11 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { ChainFlowLive } from "@/components/chain-flow";
 import { clueText, useChainYard } from "@/components/chain-rounds";
 import { Door, useReducedMotion } from "@/components/door/door";
 import { usePlayer } from "@/lib/chain/player";
+import { MULTI_LINE_SECONDS } from "@/lib/chain/shared";
 import type { ChainUnit } from "@/lib/chain/types";
 import { explorer } from "@/lib/config";
 import { clock, pad2, short, usd } from "@/lib/format";
@@ -50,6 +52,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const [deposit, setDeposit] = useState(1);
   const [amount, setAmount] = useState(0.4);
   const [shown, setShown] = useState(false);
+  const [copied, setCopied] = useState(false);
   const prev = useRef<string>("");
 
   const status = unit?.status;
@@ -85,6 +88,8 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const left = unit.closesAt - now;
   const biddingOpen = unit.status === "bidding" && unit.stocked && left > 0;
   const closed = unit.status === "closed";
+  const multi = unit.mode === "multi";
+  const players = unit.bids.filter((b) => !b.house).length;
   const won = closed && unit.winner === me;
   const clues = unit.clues.map(clueText);
   const lots = closed ? unit.lots : null;
@@ -106,6 +111,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
   if (closed) phaseLabel = "Opened";
 
   return (
+    <>
     <div className="grid gap-8 lg:grid-cols-[1.1fr_1fr] lg:gap-14">
       <div className="brackets">
         <Door
@@ -131,6 +137,13 @@ export function LiveStage({ unitId }: { unitId: number }) {
         <div className="mt-6 space-y-8">
           {!closed && <WalletBar />}
 
+          {(unit.status === "created" || unit.status === "open") && (
+            <p className="text-[17px] text-ink-2">
+              <span className="text-ink">{multi ? "Multiplayer unit." : "Solo unit."}</span>{" "}
+              {multi ? `Players only, no house bidders. ${players === 0 ? "Nobody is in line yet." : players === 1 ? "One player is in line." : `${players} players are in line.`}` : "You bid against two house bidders that see the same three clues you do. Other players can join too."}
+            </p>
+          )}
+
           {unit.status === "created" && <Step title="Drawing the contents">MagicBlock VRF is picking this unit's random number. It takes a few seconds.</Step>}
 
           {unit.status === "open" && me && !mine && (
@@ -149,8 +162,16 @@ export function LiveStage({ unitId }: { unitId: number }) {
             </form>
           )}
 
-          {unit.status === "open" && mine && (
+          {unit.status === "open" && mine && !multi && (
             <Step title="You're in line">The door locks about 15 seconds after the first player joins. Then the clues go up and bidding starts.</Step>
+          )}
+          {unit.status === "open" && mine && multi && (
+            <Step title={players < 2 ? "Waiting for another player" : "You're in line"}>
+              {players < 2
+                ? "Send the link to someone and they can bid against you. If nobody joins within two minutes, a house bidder takes the seat so the round still runs."
+                : `${players} players are in. The door locks about ${MULTI_LINE_SECONDS} seconds after the last one joins, so there is still time for more.`}
+              <button type="button" className="btn btn-ghost btn-sm mt-4 block" onClick={() => { void navigator.clipboard?.writeText(window.location.href).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }); }}>{copied ? "Link copied" : "Copy invite link"}</button>
+            </Step>
           )}
 
           {unit.status === "bidding" && !unit.stocked && <Step title="Locking the door">The unit is moving to the private rollup and being stocked. Clues are next.</Step>}
@@ -261,5 +282,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
         </div>
       </div>
     </div>
+    <ChainFlowLive unit={unit} iBid={!!mine?.hasBid} />
+    </>
   );
 }

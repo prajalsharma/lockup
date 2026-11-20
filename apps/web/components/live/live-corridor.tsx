@@ -20,13 +20,13 @@ export function LiveCorridor() {
         const left = u.closesAt - now;
         const line =
           u.status === "created" ? "Drawing contents" :
-          u.status === "open" ? `${u.bids.length} in line · from ${usd(u.minBid)}` :
+          u.status === "open" ? (u.mode === "multi" ? `${u.bids.filter((x) => !x.house).length} of 2 players in` : `${u.bids.length} in line · from ${usd(u.minBid)}`) :
           u.status === "bidding" ? (u.stocked && left > 0 ? "Sealed bidding" : "Locked") :
           u.winner ? `Sold · held ${usd(u.value)}` : "Closed, no bids";
         const big = u.status === "open" ? "Open" : u.status === "bidding" && u.stocked && left > 0 ? clock(left) : open && u.winner ? usd(u.winningBid) : "—";
         return (
           <li key={u.id} className="rise" style={{ ["--i" as string]: i }}>
-            <Link href={`/live/${u.id}`} className="group block" aria-label={`Live unit ${pad2(u.id)}, ${line}`}>
+            <Link href={`/live/${u.id}`} className="group block" aria-label={`${u.mode === "multi" ? "Multiplayer" : "Solo"} unit ${pad2(u.id)}, ${line}`}>
               <div className="relative aspect-[3/4] overflow-hidden border-x border-t border-[#30343a] bg-[#1b1c1f] lg:border-l-0 lg:first:border-l">
                 <div className="absolute inset-x-[9%] bottom-0 top-[13%] overflow-hidden bg-[#2a241d]">
                   <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(255,180,90,0.35),transparent_75%)]" />
@@ -46,6 +46,7 @@ export function LiveCorridor() {
               <div className="px-1 pt-3 lg:px-3">
                 <p className="num text-[22px] leading-none">{big}</p>
                 <p className="label mt-1.5 text-ink-3">{line}</p>
+                <p className={`label mt-1 ${u.mode === "multi" ? "text-accent-text" : "text-ink-2"}`}>{u.mode === "multi" ? "Multiplayer" : "Solo"}</p>
               </div>
             </Link>
           </li>

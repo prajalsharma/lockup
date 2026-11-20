@@ -32,4 +32,12 @@ export const stallPda = (listing: PublicKey) => pda([enc("stall"), listing.toBuf
 /** The yard buys any listing priced at or under this share of the appraisal and returns it to the pool. */
 export const HOUSE_BUY_SHARE = 0.5;
 
+/** A unit's mode is public on chain: multiplayer units run a longer clock than solo ones. */
+export const SOLO_SECONDS = 75;
+export const MULTI_SECONDS = 90;
+/** How long a multiplayer unit waits for a second player before a house bidder takes the seat. */
+export const MULTI_WAIT_SECONDS = 120;
+/** How long the line stays open after the last player a multiplayer unit was waiting for joins. */
+export const MULTI_LINE_SECONDS = 25;
+
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

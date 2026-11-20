@@ -20,12 +20,12 @@ import nacl from "tweetnacl";
 import idl from "./idl.json";
 import {
   BID_MINT, DELEGATION_PROGRAM, ITEMS, PROGRAM, RPC, TEE_RPC, TEE_VALIDATOR, USD, VAULT, VRF_QUEUE, YARD,
-  HOUSE_BUY_SHARE, bidPda, bidderPda, manifestPda, stallPda, unitPda, warehousePda,
+  HOUSE_BUY_SHARE, MULTI_LINE_SECONDS, MULTI_SECONDS, MULTI_WAIT_SECONDS, SOLO_SECONDS, bidPda, bidderPda, manifestPda, stallPda, unitPda, warehousePda,
 } from "./shared";
 
-const TARGET_OPEN = 3;
+const TARGET_SOLO = 2; // solo units kept waiting: you against two house bidders
+const TARGET_MULTI = 1; // multiplayer units kept waiting: players only
 const WINDOW = 10; // how many recent units the keeper looks after
-const DURATION = 75; // seconds of sealed bidding
 const LINE_SECONDS = 15; // wait after the first player joins before the door locks
 // Stakes are in Circle devnet USDC and deliberately small: the whole yard runs on a float of about 20 USDC.
 const MIN_BID = 0.1 * USD;
@@ -112,6 +112,7 @@ export async function readUnits(k: Keeper | null, limit = WINDOW): Promise<{ yar
 }
 
 const status = (u: any) => Object.keys(u.status)[0] as "created" | "open" | "bidding" | "closed";
+const isMulti = (u: any) => Number(u.duration) >= MULTI_SECONDS;
 const isHouse = (k: Keeper, who: PublicKey) => k.house.some((h) => h.publicKey.equals(who));
 
 /** What a house bidder offers, using nothing but the three public clues. */
@@ -151,20 +152,33 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
     const treasury = getAssociatedTokenAddressSync(BID_MINT, k.keeper.publicKey);
     const { yard, units } = await readUnits(k);
     const now = Math.floor(Date.now() / 1000);
-    let waiting = 0;
+    const waiting = { solo: 0, multi: 0 };
 
     for (const { id, key, onRollup, u } of units) {
       const st = status(u);
 
       if (st === "created") {
-        waiting++;
+        waiting[isMulti(u) ? "multi" : "solo"]++;
         // The draw is requested with creation; ask again only if it has clearly gone missing.
         continue;
       }
 
       if (st === "open") {
-        waiting++;
-        for (const [n, h] of k.house.entries()) {
+        const multi = isMulti(u);
+        const humans = u.slots.filter((s: any) => !isHouse(k, s.bidder));
+        if (!humans.length) waiting[multi ? "multi" : "solo"]++;
+        // When each player joined, read from their records on Solana.
+        const joined: number[] = [];
+        for (const h of humans) {
+          const rec = await (p.account as any).bidder.fetch(bidderPda(key, h.bidder)).catch(() => null);
+          if (rec) joined.push(Number(rec.joinedAt));
+        }
+        const first = joined.length ? Math.min(...joined) : 0;
+        const last = joined.length ? Math.max(...joined) : 0;
+        // Solo: two house bidders are always in line. Multiplayer: players only, unless one
+        // player has waited alone too long, in which case a single house bidder takes the seat.
+        const seats = !multi ? k.house : humans.length === 1 && first && now - first >= MULTI_WAIT_SECONDS ? k.house.slice(0, 1) : [];
+        for (const [n, h] of seats.entries()) {
           if (u.slots.some((s: any) => s.bidder.equals(h.publicKey))) continue;
           const ata = getAssociatedTokenAddressSync(BID_MINT, h.publicKey);
           await step(`house ${n + 1} joins unit ${id}`, async () => {
@@ -185,16 +199,16 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
               .rpc();
           });
         }
-        const humans = u.slots.filter((s: any) => !isHouse(k, s.bidder));
-        if (humans.length) {
-          const first = await (p.account as any).bidder.fetch(bidderPda(key, humans[0].bidder)).catch(() => null);
-          const full = u.slots.length >= 8;
-          if (first && (full || now - Number(first.joinedAt) >= LINE_SECONDS)) {
-            await step(`start + delegate unit ${id}`, async () => {
-              const del = await p.methods.delegateUnit(new BN(id)).accountsPartial({ authority: k.keeper.publicKey, yard: YARD, unit: key, validator: TEE_VALIDATOR }).instruction();
-              await p.methods.startUnit().accountsPartial({ authority: k.keeper.publicKey, unit: key }).postInstructions([del]).rpc();
-            });
-          }
+        const houseIn = u.slots.length - humans.length;
+        const full = u.slots.length >= 8;
+        const ready = !multi
+          ? first > 0 && now - first >= LINE_SECONDS
+          : humans.length >= 2 ? now - last >= MULTI_LINE_SECONDS : humans.length === 1 && houseIn > 0;
+        if (humans.length && (full || ready)) {
+          await step(`start + delegate unit ${id}`, async () => {
+            const del = await p.methods.delegateUnit(new BN(id)).accountsPartial({ authority: k.keeper.publicKey, yard: YARD, unit: key, validator: TEE_VALIDATOR }).instruction();
+            await p.methods.startUnit().accountsPartial({ authority: k.keeper.publicKey, unit: key }).postInstructions([del]).rpc();
+          });
         }
         continue;
       }
@@ -273,13 +287,14 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
     }
 
     // Keep a few doors waiting for players.
-    if (waiting < TARGET_OPEN) {
+    const want = waiting.solo < TARGET_SOLO ? SOLO_SECONDS : waiting.multi < TARGET_MULTI ? MULTI_SECONDS : 0;
+    if (want) {
       const id = Number(yard.unitCount) + 1;
       const key = unitPda(id);
       const commit = createHash("sha256").update(saltFor(k, key)).digest();
-      await step(`create unit ${id} + request draw`, async () => {
+      await step(`create ${want === MULTI_SECONDS ? "multiplayer" : "solo"} unit ${id} + request draw`, async () => {
         const draw = await p.methods.requestDraw().accountsPartial({ authority: k.keeper.publicKey, unit: key, oracleQueue: VRF_QUEUE }).instruction();
-        await p.methods.createUnit(new BN(id), new BN(DURATION), new BN(MIN_BID), [...commit])
+        await p.methods.createUnit(new BN(id), new BN(want), new BN(MIN_BID), [...commit])
           .accountsPartial({ authority: k.keeper.publicKey, yard: YARD, unit: key, systemProgram: SystemProgram.programId }).postInstructions([draw]).rpc();
       });
     }

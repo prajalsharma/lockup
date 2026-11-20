@@ -11,8 +11,21 @@ export default function YardPage() {
       <div className="border-b border-line pb-10">
         <p className="label flex items-center gap-2.5 text-ink-2"><span className="inline-block h-2 w-2 bg-accent" aria-hidden />Live on Solana devnet · bids in devnet USDC</p>
         <h1 className="display mt-4 text-[clamp(64px,9vw,136px)]">The yard</h1>
-        <p className="mt-4 max-w-[560px] text-[17px] text-ink-2">These doors are real accounts on Solana. Line up with a deposit, read the clues once the door locks, and seal a bid on MagicBlock's private rollup. Two house bidders play every unit; they see the same three clues you do.</p>
+        <p className="mt-4 max-w-[560px] text-[17px] text-ink-2">These doors are real accounts on Solana. Line up with a deposit, read the clues once the door locks, and seal a bid on MagicBlock's private rollup. Solo units put you against two house bidders that see the same clues you do. Multiplayer units are players only: open one, copy the invite link and bid against someone you know.</p>
       </div>
+      <ol className="mt-10 grid gap-x-10 gap-y-6 sm:grid-cols-2 lg:grid-cols-4" aria-label="How to play">
+        {[
+          ["Connect a wallet", "A new wallet is sent 1 devnet USDC and a little SOL for fees."],
+          ["Pick a door and line up", "Put down a deposit. It is the most you can bid, and everyone can see it."],
+          ["Read the clues, seal one bid", "When the door locks, three clues go up. Your bid stays hidden from everyone."],
+          ["The highest bid opens it", "Losers get everything back. The winner keeps the items or sells them."],
+        ].map(([t, d], i) => (
+          <li key={t} className="flex gap-4">
+            <span className="stencil text-[44px] leading-[0.9] text-ink-3" aria-hidden>{i + 1}</span>
+            <span><span className="block text-[17px] font-semibold">{t}</span><span className="mt-1 block text-[15px] text-ink-2">{d}</span></span>
+          </li>
+        ))}
+      </ol>
       <div className="mt-12"><LiveCorridor /></div>
 
       <section className="mt-28" aria-labelledby="onchain">

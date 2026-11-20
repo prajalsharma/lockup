@@ -3,6 +3,8 @@ export interface ChainUnit {
   address: string;
   status: "created" | "open" | "bidding" | "closed";
   onRollup: boolean;
+  /** Solo: you against two house bidders. Multi: players only. Read from the unit's clock length. */
+  mode: "solo" | "multi";
   stocked: boolean;
   minBid: number;
   duration: number;
@@ -15,6 +17,8 @@ export interface ChainUnit {
   value: number;
   lots: DoorLot[];
   claimed: boolean;
+  /** First bytes of the unit's VRF randomness, as hex. Empty until the draw lands. */
+  draw: string;
 }
 export interface ChainYard {
   programId: string;

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Hero } from "@/components/landing/hero";
 import { Story } from "@/components/landing/story";
+import { ChainFlowLanding } from "@/components/chain-flow";
 import { LiveCorridor } from "@/components/live/live-corridor";
 import { MAGICBLOCK, PROGRAM_ID, explorer } from "@/lib/config";
 
@@ -13,7 +14,7 @@ const CHECKS = [
 ];
 
 const TODAY = [
-  "Two house bidders join every unit so there is always someone to beat. They are run by us and bid from the three public clues only. That rule is in our code, not enforced by the chain.",
+  "Solo units have two house bidders so there is always someone to beat. They are run by us and bid from the three public clues only. That rule is in our code, not enforced by the chain. Multiplayer units have none, unless one player waits alone for two minutes.",
   "Each unit's operator knows a secret salt, so the operator can work out the contents early. The operator can't choose them: the random draw arrives after the salt is locked in, and the salt is published when the unit closes.",
   "Rounds move only while someone has the site open. The keeper that locks, opens and settles units is driven by visits to the yard.",
   "Appraisals are our numbers, not market prices. The yard's own buyer pays half the appraisal and is run by us, and the warehouse was stocked by us with far more of each item than will ever be drawn.",
@@ -48,6 +49,19 @@ export default function Home() {
       </section>
 
       <Story />
+
+      {/* Where it happens */}
+      <section id="map" className="border-b border-line">
+        <div className="wrap py-24 md:py-32">
+          <div className="mb-12 grid gap-6 lg:grid-cols-[1fr_1fr] lg:items-end">
+            <h2 className="display reveal text-[clamp(48px,7vw,112px)]">Where each step happens</h2>
+            <p className="reveal max-w-[520px] text-[17px] text-ink-2 lg:justify-self-end">
+              Solana is the base: it holds the money and the final result, in public. MagicBlock VRF supplies the random draw. MagicBlock's private rollup is where the contents and the bids stay hidden until the clock runs out.
+            </p>
+          </div>
+          <ChainFlowLanding />
+        </div>
+      </section>
 
       {/* Proof */}
       <section id="check" className="border-b border-line">
@@ -104,7 +118,7 @@ export default function Home() {
           <div className="mb-12 grid gap-6 lg:grid-cols-[1fr_1fr] lg:items-end">
             <h2 className="display reveal text-[clamp(48px,7vw,112px)]">Pick a door</h2>
             <p className="reveal max-w-[520px] text-[17px] text-ink-2 lg:justify-self-end">
-              These are the units on Solana devnet right now. Connect a wallet and line up. Bids are in Circle's devnet USDC, and new wallets are sent 1 USDC to start. A round takes about two minutes.
+              These are the units on Solana devnet right now. Connect a wallet and line up. Solo units put you against two house bidders; multiplayer units are players only, with a link to invite someone. Bids are in Circle's devnet USDC, and new wallets are sent 1 USDC to start. A round takes about two minutes.
             </p>
           </div>
           <LiveCorridor />
