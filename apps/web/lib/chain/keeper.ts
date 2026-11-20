@@ -331,11 +331,50 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
 }
 
 let lastDrip = 0;
-export interface DripResult { sol: "sent" | "has" | "empty" | "busy"; usdc: "sent" | "has" | "empty" | "busy" | "already" }
+export interface DripResult { sol: "sent" | "has" | "empty" | "busy" | "limit"; usdc: "sent" | "has" | "empty" | "busy" | "already" | "limit" }
+
+// Starter funds are rationed, and the ration lives on chain so every server instance agrees.
+//
+// USDC: each starter transaction also creates one tiny "hour slot" account and one "day slot"
+// account at addresses derived from the current hour and day. Creating an account that already
+// exists fails, and that fails the whole transaction, so two requests racing for the same slot
+// cannot both be paid. When every slot of the hour or day is taken, nothing more goes out.
+//
+// SOL: starter SOL is small, so it is counted from the recent transactions of a marker address.
+const USDC_PER_HOUR = Number(process.env.DRIP_USDC_PER_HOUR ?? 8);
+const USDC_PER_DAY = Number(process.env.DRIP_USDC_PER_DAY ?? 24);
+const SOL_PER_HOUR = Number(process.env.DRIP_SOL_PER_HOUR ?? 16);
+const SOL_PER_DAY = Number(process.env.DRIP_SOL_PER_DAY ?? 48);
+const SLOT_RENT = 890_880; // rent-exempt minimum for an empty account
+const slotKeys = (k: Keeper, seeds: string[]) => Promise.all(seeds.map((seed) => PublicKey.createWithSeed(k.keeper.publicKey, seed, SystemProgram.programId)));
+const takeSlot = (k: Keeper, seed: string, key: PublicKey) => SystemProgram.createAccountWithSeed({ fromPubkey: k.keeper.publicKey, basePubkey: k.keeper.publicKey, newAccountPubkey: key, seed, lamports: SLOT_RENT, space: 0, programId: SystemProgram.programId });
+/** The first free hour slot and day slot, or null when the ration for either is used up. */
+async function freeSlots(k: Keeper) {
+  const now = Math.floor(Date.now() / 1000);
+  const hours = Array.from({ length: USDC_PER_HOUR }, (_, i) => `h${Math.floor(now / 3600)}-${i}`);
+  const days = Array.from({ length: USDC_PER_DAY }, (_, i) => `d${Math.floor(now / 86400)}-${i}`);
+  const keys = await slotKeys(k, [...hours, ...days]);
+  const infos = await connection.getMultipleAccountsInfo(keys);
+  // A random free slot, so two honest requests in the same second rarely pick the same one.
+  const pick = (free: number[]) => (free.length ? free[Math.floor(Math.random() * free.length)] : -1);
+  const h = pick(hours.map((_, i) => i).filter((i) => !infos[i]));
+  const d = pick(days.map((_, i) => i).filter((i) => !infos[hours.length + i]));
+  if (h < 0 || d < 0) return null;
+  return [takeSlot(k, hours[h], keys[h]), takeSlot(k, days[d], keys[hours.length + d])];
+}
+const marker = (k: Keeper, what: string) => Keypair.fromSeed(createHmac("sha256", k.secret).update(`starter-${what}`).digest()).publicKey;
+const mark = (k: Keeper, what: string) => SystemProgram.transfer({ fromPubkey: k.keeper.publicKey, toPubkey: marker(k, what), lamports: 0 });
+async function sentSince(k: Keeper, what: string, seconds: number[]): Promise<number[]> {
+  const sigs = await connection.getSignaturesForAddress(marker(k, what), { limit: 100 });
+  const now = Date.now() / 1000;
+  return seconds.map((s) => sigs.filter((x) => !x.err && (x.blockTime ?? now) > now - s).length);
+}
+
 /**
  * Starter funds for a new player: a little devnet SOL for fees and 1 USDC to bid with.
  * SOL goes to any wallet that has none. USDC goes only to a wallet that has never held a USDC
  * account, so each wallet gets it once; after that, more comes from Circle's faucet.
+ * Both are capped per hour, and USDC per day, across all visitors.
  */
 export async function drip(k: Keeper, to: PublicKey): Promise<DripResult> {
   if (Date.now() - lastDrip < 6000) return { sol: "busy", usdc: "busy" };
@@ -349,19 +388,34 @@ export async function drip(k: Keeper, to: PublicKey): Promise<DripResult> {
   const out: DripResult = { sol: "has", usdc: theirAta ? "already" : "has" };
   if (theirs < 0.01 * LAMPORTS_PER_SOL) {
     if (ours < 0.15 * LAMPORTS_PER_SOL) out.sol = "empty";
-    else { tx.add(SystemProgram.transfer({ fromPubkey: k.keeper.publicKey, toPubkey: to, lamports: DRIP_LAMPORTS })); out.sol = "sent"; }
+    else {
+      const [hour, day] = await sentSince(k, "sol", [3600, 86400]);
+      if (hour >= SOL_PER_HOUR || day >= SOL_PER_DAY) out.sol = "limit";
+      else { tx.add(SystemProgram.transfer({ fromPubkey: k.keeper.publicKey, toPubkey: to, lamports: DRIP_LAMPORTS }), mark(k, "sol")); out.sol = "sent"; }
+    }
   }
   if (!theirAta) {
+    // USDC is no use to a wallet that can't pay fees, so it only goes out alongside or after SOL.
+    if (out.sol === "limit" || out.sol === "empty") out.usdc = "limit";
     // Keep enough back to fund the house bidders.
-    if (float < 3 * USD) out.usdc = "empty";
+    else if (float < 3 * USD) out.usdc = "empty";
     else {
-      tx.add(createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, ata, to, BID_MINT), createTransferInstruction(treasury, ata, k.keeper.publicKey, STARTER_USDC));
-      out.usdc = "sent";
+      const slots = await freeSlots(k);
+      if (!slots) out.usdc = "limit";
+      else {
+        tx.add(...slots, createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, ata, to, BID_MINT), createTransferInstruction(treasury, ata, k.keeper.publicKey, STARTER_USDC));
+        out.usdc = "sent";
+      }
     }
   }
   if (tx.instructions.length) {
     lastDrip = Date.now();
-    await prog(connection, k.keeper).provider.sendAndConfirm!(tx);
+    try { await prog(connection, k.keeper).provider.sendAndConfirm!(tx); } catch (e) {
+      // With a slot in the transaction, a failure almost always means someone else took the same
+      // slot in the same moment. Nothing was sent; the caller can ask again.
+      if (out.usdc === "sent") return { sol: "busy", usdc: "busy" };
+      throw e;
+    }
   }
   return out;
 }

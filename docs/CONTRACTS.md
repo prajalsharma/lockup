@@ -55,6 +55,16 @@ keeper, paid from the operator's treasury; the chain does not guarantee it.
 - House bidders are run by the keeper and are meant to bid from the public clues only. That is a rule
   in `apps/web/lib/chain/keeper.ts`, not something the chain enforces.
 
+## Starter funds are rationed on chain
+
+New wallets are sent 1 devnet USDC and a little SOL by the keeper. To stop a script draining that, each
+USDC starter transaction also creates one "hour slot" and one "day slot" account at addresses derived
+from the current hour and day (8 an hour, 24 a day). Creating an account that already exists fails the
+whole transaction, so the cap holds even when many requests arrive at once on different servers.
+Starter SOL is capped by counting a marker address's recent transactions (16 an hour, 48 a day).
+Checked on the live site: 86 fresh wallets asked in bursts of 40 and exactly the remaining 5 slots of
+that hour were paid.
+
 ## Checked on devnet
 
 `pnpm attack` joins a live solo unit as a player and tries 22 ways to cheat it, on Solana and inside the

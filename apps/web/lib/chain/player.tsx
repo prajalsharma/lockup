@@ -93,7 +93,7 @@ const plain = (e: unknown) => {
   if (named) return named[1] + ".";
   if (/User rejected|rejected the request|cancel/i.test(m)) return "You cancelled that in your wallet.";
   if (/insufficient lamports|insufficient funds for (fee|rent)|Attempt to debit/i.test(m)) return "This wallet has no devnet SOL for fees.";
-  if (/^Not enough USDC|^Starter USDC/.test(m)) return m;
+  if (/^Not enough USDC|^Starter USDC|^Starter funds/.test(m)) return m;
   if (/429|Too Many/i.test(m)) return "Devnet is busy. Try again in a few seconds.";
   if (/does not support|signMessage/i.test(m)) return "This wallet can't sign messages, which the private rollup needs. Try another wallet.";
   return m.split("\n")[0].slice(0, 140);
@@ -211,6 +211,7 @@ function Inner({ children }: { children: React.ReactNode }) {
       if (r.sol !== "busy" && r.sol !== undefined) break;
       await sleep(3500);
     }
+    if (r.sol === "limit" || (needUsdc && r.usdc === "limit")) throw new Error("Starter funds are rationed and this hour's are gone. Try again later, or use Circle's faucet.");
     if (needSol && r.sol !== "sent") throw new Error("This wallet has no devnet SOL for fees.");
     for (let i = 0; i < 10; i++) {
       const now = await refreshFor(s.publicKey);
