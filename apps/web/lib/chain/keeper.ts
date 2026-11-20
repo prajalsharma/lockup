@@ -341,10 +341,10 @@ export interface DripResult { sol: "sent" | "has" | "empty" | "busy" | "limit"; 
 // cannot both be paid. When every slot of the hour or day is taken, nothing more goes out.
 //
 // SOL: starter SOL is small, so it is counted from the recent transactions of a marker address.
-const USDC_PER_HOUR = Number(process.env.DRIP_USDC_PER_HOUR ?? 8);
-const USDC_PER_DAY = Number(process.env.DRIP_USDC_PER_DAY ?? 24);
-const SOL_PER_HOUR = Number(process.env.DRIP_SOL_PER_HOUR ?? 16);
-const SOL_PER_DAY = Number(process.env.DRIP_SOL_PER_DAY ?? 48);
+const USDC_PER_HOUR = Number(process.env.DRIP_USDC_PER_HOUR ?? 10);
+const USDC_PER_DAY = Number(process.env.DRIP_USDC_PER_DAY ?? 40);
+const SOL_PER_HOUR = Number(process.env.DRIP_SOL_PER_HOUR ?? 20);
+const SOL_PER_DAY = Number(process.env.DRIP_SOL_PER_DAY ?? 80);
 const SLOT_RENT = 890_880; // rent-exempt minimum for an empty account
 const slotKeys = (k: Keeper, seeds: string[]) => Promise.all(seeds.map((seed) => PublicKey.createWithSeed(k.keeper.publicKey, seed, SystemProgram.programId)));
 const takeSlot = (k: Keeper, seed: string, key: PublicKey) => SystemProgram.createAccountWithSeed({ fromPubkey: k.keeper.publicKey, basePubkey: k.keeper.publicKey, newAccountPubkey: key, seed, lamports: SLOT_RENT, space: 0, programId: SystemProgram.programId });

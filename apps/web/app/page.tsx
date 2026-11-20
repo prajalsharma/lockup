@@ -18,7 +18,7 @@ const TODAY = [
   "Each unit's operator knows a secret salt, so the operator can work out the contents early. The operator can't choose them: the random draw arrives after the salt is locked in, and the salt is published when the unit closes.",
   "Rounds move only while someone has the site open. The keeper that locks, opens and settles units is driven by visits to the yard.",
   "Appraisals are our numbers, not market prices. The yard's own buyer pays half the appraisal and is run by us, and the warehouse was stocked by us with far more of each item than will ever be drawn.",
-  "Stakes are small on purpose. The yard runs on about 20 devnet USDC, and new wallets are sent 1 USDC to start, up to 8 wallets an hour and 24 a day. More comes from Circle's faucet.",
+  "Stakes are small on purpose. The yard runs on about 20 devnet USDC, and new wallets are sent 1 USDC to start, up to 10 wallets an hour and 40 a day. More comes from Circle's faucet.",
 ];
 const ON_CHAIN = [
   "It is devnet only. Bids are in Circle's devnet USDC and items are test tokens. None of it has real value.",

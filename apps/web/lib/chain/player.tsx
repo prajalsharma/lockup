@@ -13,7 +13,7 @@ import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transa
 import nacl from "tweetnacl";
 import dynamic from "next/dynamic";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { EmailWalletCtx, PRIVY_APP_ID } from "./email-wallet";
+import { EmailWalletCtx, PRIVY_APP_ID, type EmailWallet } from "./email-wallet";
 import { BID_MINT, RPC, TEE_RPC, USD, VAULT, YARD, bidPda, bidderPda, listingPda, sleep, stallPda, unitPda } from "./shared";
 
 interface Signer {
@@ -318,6 +318,14 @@ function Inner({ children }: { children: React.ReactNode }) {
     .filter((w) => w.readyState === "Installed" || w.readyState === "Loadable")
     .map((w) => ({ name: w.adapter.name, icon: w.adapter.icon, installed: w.readyState === "Installed" }));
 
+  // Email sign-in chosen before Privy finished loading: open its login as soon as it is ready.
+  const wantLogin = useRef(false);
+  useEffect(() => {
+    if (!wantLogin.current || !email?.ready) return;
+    wantLogin.current = false;
+    if (!email.authenticated) email.login();
+  }, [email]);
+
   // Selecting a wallet in the adapter is asynchronous; connect once it is selected.
   const wantConnect = useRef(false);
   useEffect(() => {
@@ -328,12 +336,12 @@ function Inner({ children }: { children: React.ReactNode }) {
   useEffect(() => { if (mode === "extension" && adapter.connected) setPickerOpen(false); }, [mode, adapter.connected]);
 
   const value: PlayerState = {
-    ready: ready && (mode !== "email" || !email || email.ready), address: who, walletName: signer?.name ?? null, walletIcon: signer?.icon ?? null, isQuick: signer?.kind === "quick",
+    ready: ready && (mode !== "email" || (email ? email.ready : !PRIVY_APP_ID)), address: who, walletName: signer?.name ?? null, walletIcon: signer?.icon ?? null, isQuick: signer?.kind === "quick",
     connecting: adapter.connecting, sol, dollars, choices, pickerOpen, busy, error, myBids,
     openPicker: () => { setError(null); setPickerOpen(true); },
     closePicker: () => setPickerOpen(false),
-    emailLogin: !!email,
-    useEmail: () => { setError(null); remember("email"); setPickerOpen(false); if (email && !email.authenticated) email.login(); },
+    emailLogin: !!PRIVY_APP_ID,
+    useEmail: () => { setError(null); remember("email"); setPickerOpen(false); if (email?.ready) { if (!email.authenticated) email.login(); } else wantLogin.current = true; },
     useQuick: () => { setError(null); setQuick(quickSigner()); remember("quick"); setPickerOpen(false); },
     useExtension: (name) => {
       setError(null);
@@ -354,10 +362,19 @@ function Inner({ children }: { children: React.ReactNode }) {
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
-const PrivyBridge = dynamic(() => import("./privy"));
-/** Email sign-in is only mounted when a Privy app is configured; otherwise its code is never loaded. */
+const PrivyIsland = dynamic(() => import("./privy"), { ssr: false });
+/**
+ * Email sign-in. Privy is loaded beside the app, after it has started, and reports its state
+ * here. Wrapping the app in it instead would make every page wait for that library.
+ */
 function EmailLayer({ children }: { children: React.ReactNode }) {
-  return PRIVY_APP_ID ? <PrivyBridge>{children}</PrivyBridge> : <>{children}</>;
+  const [wallet, setWallet] = useState<EmailWallet | null>(null);
+  return (
+    <EmailWalletCtx.Provider value={wallet}>
+      {children}
+      {PRIVY_APP_ID && <PrivyIsland onChange={setWallet} />}
+    </EmailWalletCtx.Provider>
+  );
 }
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {

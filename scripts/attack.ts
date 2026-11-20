@@ -13,12 +13,32 @@ import { RPC, USD, loadIdl, loadKeypair, pdas, programFor, sleep, teeConnection 
 const SITE = process.env.SITE ?? "https://lockup-seven.vercel.app";
 const results: boolean[] = [];
 const check = (step: string, ok: boolean, note = "") => { results.push(ok); console.log(`  ${ok ? "✓" : "✗"} ${step}${note ? `  (${note})` : ""}`); };
-/** Passes only if the call fails, and reports why it failed. */
-async function refused(step: string, f: () => Promise<unknown>, want?: RegExp) {
-  try { await f(); check(step, false, "it went through"); } catch (e) {
-    const m = String((e as any)?.message ?? e);
-    const code = /Error Code: (\w+)/.exec(m)?.[1] ?? /custom program error: (0x\w+)/.exec(m)?.[1] ?? (m.replace(/\s+/g, " ").trim().slice(0, 70) || "refused, no reason returned");
-    check(step, want ? want.test(m) : true, code);
+const ERRORS = new Map<number, string>();
+/** Why a transaction would fail, read from a simulation. The rollup's send path returns no logs, but its simulation does. */
+async function reason(builder: any): Promise<string> {
+  try { await builder.simulate(); return ""; } catch (e: any) {
+    const logs: string[] = e?.simulationResponse?.logs ?? e?.logs ?? [];
+    const text = `${logs.join("\n")}\n${e?.message ?? ""}`;
+    const named = /Error Code: (\w+)/.exec(text)?.[1];
+    if (named) return named;
+    const custom = /custom program error: (0x[0-9a-f]+)/i.exec(text)?.[1] ?? (/"Custom":\s*(\d+)/.exec(JSON.stringify(e?.simulationResponse?.err ?? ""))?.[1]);
+    if (custom) { const n = Number(custom); return ERRORS.get(n) ?? (n === 0 ? "account already exists" : `error ${n}`); }
+    return text.replace(/\s+/g, " ").trim().slice(0, 70);
+  }
+}
+/** Passes only if the call fails, and reports why. `f` returns either a promise or an Anchor method builder. */
+async function refused(step: string, f: () => any, want?: RegExp) {
+  let builder: any = null;
+  try {
+    const x = await f();
+    if (x && typeof x.rpc === "function") { builder = x; await x.rpc(); }
+    check(step, false, "it went through");
+  } catch (e) {
+    const m = String((e as any)?.message ?? e) + ((e as any)?.logs ?? []).join("\n");
+    let code = /Error Code: (\w+)/.exec(m)?.[1] ?? "";
+    if (!code && builder) code = await reason(builder);
+    if (!code) code = /custom program error: (0x\w+)/.exec(m)?.[1] ?? (m.replace(/\s+/g, " ").trim().slice(0, 70) || "refused, no reason returned");
+    check(step, want ? want.test(code) || want.test(m) : true, code);
   }
 }
 const chain = async () => { for (;;) { try { const j: any = await (await fetch(`${SITE}/api/chain`)).json(); if (j.units) return j; } catch { /* retry */ } await sleep(1500); } };
@@ -29,6 +49,7 @@ async function main() {
   const g = loadKeypair(`${dir}/g.json`), h = loadKeypair(`${dir}/h.json`);
   const connection = new Connection(RPC, "confirmed");
   const { idl, programId } = loadIdl();
+  for (const e of (idl as any).errors ?? []) ERRORS.set(e.code, e.name);
   const p = pdas(programId);
   const gp = programFor(idl, connection, g), hp = programFor(idl, connection, h);
   const yard = await (gp.account as any).yard.fetch(p.yard);
@@ -72,14 +93,14 @@ async function main() {
   const bidIx = async (prog: any, who: PublicKey, amount: bigint) => {
     const bid = p.bid(unit, who);
     const seal = await prog.methods.sealBid().accountsPartial({ unit, bid, permission: permissionPdaFromAccount(bid), ...perm }).instruction();
-    return prog.methods.placeBid(new BN(amount.toString())).accountsPartial({ bidder: who, unit, bid }).postInstructions([seal]).rpc();
+    return prog.methods.placeBid(new BN(amount.toString())).accountsPartial({ bidder: who, unit, bid }).postInstructions([seal]);
   };
-  await refused("bid from a wallet that is not in line", () => bidIx(th, h.publicKey, USD / 2n));
-  await refused("bid more than the deposit", () => bidIx(tg, g.publicKey, 5n * USD));
-  await refused("bid below the minimum", () => bidIx(tg, g.publicKey, USD / 100n));
+  await refused("bid from a wallet that is not in line", () => bidIx(th, h.publicKey, USD / 2n), /NotInLine/);
+  await refused("bid more than the deposit", () => bidIx(tg, g.publicKey, 5n * USD), /BidAboveDeposit/);
+  await refused("bid below the minimum", () => bidIx(tg, g.publicKey, USD / 100n), /BidTooLow/);
   const manifest = p.manifest(unit);
-  await refused("a player closes the unit early", () => tg.methods.closeUnit().accountsPartial({ authority: g.publicKey, unit }).remainingAccounts([{ pubkey: manifest, isSigner: false, isWritable: false }]).rpc());
-  await refused("a player restocks the unit with their own salt", () => tg.methods.stockUnit(Array(32).fill(7)).accountsPartial({ authority: g.publicKey, unit, manifest }).rpc());
+  await refused("a player closes the unit early", () => tg.methods.closeUnit().accountsPartial({ authority: g.publicKey, unit }).remainingAccounts([{ pubkey: manifest, isSigner: false, isWritable: false }]), /Unauthorized/);
+  await refused("a player restocks the unit with their own salt", () => tg.methods.stockUnit(Array(32).fill(7)).accountsPartial({ authority: g.publicKey, unit, manifest }), /Unauthorized/);
   // wait for a house bid, then try to read it and the contents
   for (let i = 0; i < 20; i++) { u = (await chain()).units.find((x: any) => x.id === target.id); if (u.bidCount > 0) break; await sleep(2000); }
   const house = u.bids.filter((b: any) => b.house && b.hasBid).map((b: any) => new PublicKey(b.who));
@@ -89,10 +110,10 @@ async function main() {
   check("reading the contents from a wallet that is not in line is refused", !(await read(th.provider.connection, manifest)));
   check("the bid and the contents are not on Solana", !(await connection.getAccountInfo(p.bid(unit, house[0]))) && !(await connection.getAccountInfo(manifest)));
   // If either bad bid above had landed, this one would be refused as a second bid.
-  await bidIx(tg, g.publicKey, (USD * 95n) / 100n);
+  await (await bidIx(tg, g.publicKey, (USD * 95n) / 100n)).rpc();
   check("honest bid of $0.95 goes through, so neither bad bid landed", true);
   check("I can read my own bid", await read(tg.provider.connection, p.bid(unit, g.publicKey)));
-  await refused("bid a second time", () => bidIx(tg, g.publicKey, USD / 2n));
+  await refused("bid a second time", () => bidIx(tg, g.publicKey, USD / 2n), /AlreadyBid|already exists/);
 
   console.log("\n▸ after the clock");
   for (;;) { u = (await chain()).units.find((x: any) => x.id === target.id); if (u.status === "closed" && (u.claimed || !u.winner)) break; await sleep(3000); }
