@@ -15,7 +15,10 @@ export async function GET() {
   if (k) after(() => tick(k).catch(() => undefined));
   if (cache && Date.now() - cache.at < 1500) return NextResponse.json(cache.body);
   try {
-    const { yard, units } = await readUnits(k, 12);
+    const { yard, units: all } = await readUnits(k);
+    // Every unit still in play, plus the newest finished ones.
+    const live = all.filter((x) => !("closed" in x.u.status));
+    const units = [...live, ...all.filter((x) => "closed" in x.u.status).slice(0, Math.max(6, 14 - live.length))].sort((a, b) => b.id - a.id);
     const house = new Set(k ? k.house.map((h) => h.publicKey.toBase58()) : []);
     const out: ChainUnit[] = units.map(({ id, key, onRollup, u }) => {
       const status = Object.keys(u.status)[0] as ChainUnit["status"];
@@ -32,7 +35,7 @@ export async function GET() {
         draw: status === "created" ? "" : Buffer.from(u.randomness.slice(0, 8)).toString("hex"),
       };
     });
-    const body: ChainYard = { programId: PROGRAM.toBase58(), yard: YARD.toBase58(), unitCount: Number(yard.unitCount), settled: out.filter((u) => u.status === "closed").length, keeper: !!k, units: out, readAt: Date.now() };
+    const body: ChainYard = { programId: PROGRAM.toBase58(), yard: YARD.toBase58(), unitCount: Number(yard.unitCount), settled: all.filter((x) => "closed" in x.u.status).length, keeper: !!k, units: out, readAt: Date.now() };
     cache = { at: Date.now(), body };
     return NextResponse.json(body);
   } catch (e) {

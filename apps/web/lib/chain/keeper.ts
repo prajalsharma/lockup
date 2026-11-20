@@ -25,7 +25,10 @@ import {
 
 const TARGET_SOLO = 2; // solo units kept waiting: you against two house bidders
 const TARGET_MULTI = 1; // multiplayer units kept waiting: players only
-const WINDOW = 10; // how many recent units the keeper looks after
+/** How far back the keeper and the site look. A unit left waiting keeps its place however many newer ones are made. */
+export const WINDOW = 60;
+/** Units that are completely finished: settled and claimed. Nothing more can happen to them, so they are skipped. */
+const finished = new Set<number>();
 const LINE_SECONDS = 15; // wait after the first player joins before the door locks
 // Stakes are in Circle devnet USDC and deliberately small: the whole yard runs on a float of about 20 USDC.
 const MIN_BID = 0.1 * USD;
@@ -154,7 +157,9 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
     const now = Math.floor(Date.now() / 1000);
     const waiting = { solo: 0, multi: 0 };
 
-    for (const { id, key, onRollup, u } of units) {
+    // Oldest unfinished first, so a round in progress is never starved by newer units.
+    const queue = units.filter((x) => !finished.has(x.id)).sort((a, b) => Number(status(a.u) === "closed") - Number(status(b.u) === "closed") || a.id - b.id);
+    for (const { id, key, onRollup, u } of queue) {
       const st = status(u);
 
       if (st === "created") {
@@ -264,7 +269,7 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
         const allClaimed = !hasWinner || u.claimedMask === (1 << u.lots.length) - 1;
         const records = await (p.account as any).bidder.fetchMultiple(u.slots.map((s: any) => bidderPda(key, s.bidder)));
         const unsettled = u.slots.filter((_: any, i: number) => records[i] && !records[i].settled);
-        if (!unsettled.length && allClaimed) continue;
+        if (!unsettled.length && allClaimed) { finished.add(id); continue; }
         for (const s of unsettled) {
           await step(`settle ${s.bidder.toBase58().slice(0, 4)} on unit ${id}`, () => p.methods.settleBidder()
             .accountsPartial({ crank: k.keeper.publicKey, yard: YARD, unit: key, bidderRecord: bidderPda(key, s.bidder), bidderTokenAccount: getAssociatedTokenAddressSync(BID_MINT, s.bidder), vault: VAULT, treasury, tokenProgram: TOKEN_PROGRAM_ID }).rpc());

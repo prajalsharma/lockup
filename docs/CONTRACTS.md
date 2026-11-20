@@ -57,6 +57,12 @@ keeper, paid from the operator's treasury; the chain does not guarantee it.
 
 ## Checked on devnet
 
+`pnpm attack` joins a live solo unit as a player and tries 22 ways to cheat it, on Solana and inside the
+private rollup: underfunded and double joins, bidding over the deposit, bidding twice, reading other bids
+and the contents, closing or restocking the unit, double payouts, and claiming someone else's items.
+Every attempt is refused. The rollup does not return a reason for a refusal, so for those the script checks
+only that the transaction failed and that the honest bid afterwards still went through.
+
 `pnpm market` lists, buys, cancels and sells out on devnet, and checks that a buy under the asking
 price, a buy of more than is listed, payment to the wrong wallet, a second listing of the same item
 and a cancel by someone else are all refused.

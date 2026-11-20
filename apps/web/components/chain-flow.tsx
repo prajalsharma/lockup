@@ -123,8 +123,8 @@ export function ChainFlow({ step, draw, unit }: { step: number; draw?: string | 
         </g>
         {/* payout */}
         <g className={T} opacity={open ? 1 : 0}>
-          <text x="-28" y="-30" fontSize={L.f - 2} textAnchor="end" fill="var(--ink-2)">deposits → back</text>
-          <text x="-28" y="-12" fontSize={L.f - 2} textAnchor="end" fill="var(--accent-text)">items → winner</text>
+          <text x="-40" y="-30" fontSize={L.f - 2} textAnchor="end" fill="var(--ink-2)">deposits → back</text>
+          <text x="-40" y="-12" fontSize={L.f - 2} textAnchor="end" fill="var(--accent-text)">items → winner</text>
         </g>
         {/* the unit itself: a roll-up door */}
         <g transform="translate(-19,-50)">
