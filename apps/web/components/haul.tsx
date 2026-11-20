@@ -5,11 +5,17 @@ import { usePlayer } from "@/lib/chain/player";
 import type { Haul } from "@/lib/chain/types";
 import { explorer } from "@/lib/config";
 import { pad2, usd } from "@/lib/format";
+import { HOUSE_BUY_SHARE } from "@/lib/chain/shared";
+import { useMarket } from "./market";
 
 export function HaulView() {
   const p = usePlayer();
   const [data, setData] = useState<Haul | null>(null);
   const [failed, setFailed] = useState(false);
+  const [selling, setSelling] = useState<string | null>(null);
+  const [price, setPrice] = useState(0);
+  const [tick, setTick] = useState(0);
+  const market = useMarket();
 
   useEffect(() => {
     setData(null); setFailed(false);
@@ -19,7 +25,7 @@ export function HaulView() {
     void read();
     const t = setInterval(() => { if (document.visibilityState === "visible") void read(); }, 15000);
     return () => { live = false; clearInterval(t); };
-  }, [p.address]);
+  }, [p.address, tick]);
 
   if (!p.ready) return <p className="label py-16 text-ink-3">Checking for a wallet</p>;
   if (!p.address) {
@@ -38,6 +44,8 @@ export function HaulView() {
   const got = wins.reduce((s, r) => s + r.value, 0);
   const net = got - paid;
   const shelf = data.items.reduce((s, i) => s + i.value, 0);
+  const mine = (market.listings ?? []).filter((l) => l.seller === p.address);
+  const done = (ok: boolean) => { if (ok) { setSelling(null); setTimeout(() => { setTick((t) => t + 1); void market.read(); }, 1500); } };
 
   return (
     <>
@@ -56,18 +64,55 @@ export function HaulView() {
         {data.items.length === 0 ? (
           <p className="mt-4 text-ink-2">No items yet. Win a unit and its contents are sent to this wallet as tokens.</p>
         ) : (
-          <ul className="mt-5 flex flex-wrap gap-2">
-            {data.items.map((i) => (
-              <li key={i.id}>
-                <a href={explorer(i.mint)} target="_blank" rel="noreferrer" className={`block border px-3 py-2 transition-colors duration-200 hover:border-ink ${i.rarity === 2 ? "border-accent-text text-accent-text" : "border-line-2"}`}>
-                  <span className="block text-[15px] font-semibold">{i.qty > 1 ? `${i.qty} × ` : ""}{i.name}</span>
-                  <span className="label num text-ink-3">{usd(i.value)}{i.rarity > 0 ? ` · ${i.rarity === 2 ? "grail" : "rare"}` : ""}</span>
-                </a>
+          <ul className="mt-5 border-t border-line">
+            {data.items.map((i) => {
+              const each = i.value / i.qty;
+              const quick = Math.max(0.01, Math.floor(each * HOUSE_BUY_SHARE * 100) / 100);
+              const listed = mine.some((l) => l.mint === i.mint);
+              return (
+                <li key={i.id} className="grid gap-x-8 gap-y-3 border-b border-line py-4 md:grid-cols-[1fr_auto] md:items-center">
+                  <div>
+                    <a href={explorer(i.mint)} target="_blank" rel="noreferrer" className={`text-[17px] font-semibold hover:underline ${i.rarity === 2 ? "text-accent-text" : ""}`}>{i.qty > 1 ? `${i.qty} × ` : ""}{i.name}</a>
+                    <p className="label num mt-1 text-ink-3">{usd(each)} each{i.rarity > 0 ? ` · ${i.rarity === 2 ? "grail" : "rare"}` : ""}</p>
+                  </div>
+                  {listed ? (
+                    <p className="text-sm text-ink-2">One listing per item. Take the open one back to list again.</p>
+                  ) : selling === i.mint ? (
+                    <form noValidate className="flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (price > 0) void p.sell(i.mint, price, 1).then(done); }}>
+                      <label htmlFor={`price-${i.id}`} className="label text-ink-3">Price</label>
+                      <span className="num text-ink-2">$</span>
+                      <input id={`price-${i.id}`} type="number" inputMode="decimal" step="0.01" min="0.01" value={price} onChange={(e) => setPrice(Math.max(0, Number(e.target.value) || 0))} className="num w-24 border-b border-line-2 bg-transparent py-1 text-[17px] outline-none focus:border-ink" />
+                      <button type="submit" className="btn btn-primary btn-sm" disabled={!!p.busy || price <= 0}>{p.busy ?? "List one"}</button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelling(null)}>Cancel</button>
+                    </form>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className="btn btn-ghost btn-sm" disabled={!!p.busy} onClick={() => { setPrice(Number(each.toFixed(2))); setSelling(i.mint); }}>Set a price</button>
+                      <button type="button" className="btn btn-ghost btn-sm" disabled={!!p.busy} onClick={() => void p.sell(i.mint, quick, 1).then(done)}>Sell one to the yard for {usd(quick)}</button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {p.error && <p role="alert" className="mt-4 text-bad">{p.error}</p>}
+        {data.items.length > 0 && <p className="mt-4 max-w-[620px] text-sm text-ink-2">Keep an item or sell it. Set your own price and it goes on the <Link href="/market" className="ulink ulink-on">market</Link>. The yard buys anything priced at half its appraisal or less, usually within a minute.</p>}
+      </section>
+
+      {mine.length > 0 && (
+        <section className="mt-14" aria-labelledby="forsale">
+          <h2 id="forsale" className="display text-[clamp(36px,4vw,56px)]">For sale</h2>
+          <ul className="mt-4 border-t border-line">
+            {mine.map((l) => (
+              <li key={l.address} className="flex flex-wrap items-center justify-between gap-3 border-b border-line py-4">
+                <p className="text-[17px]">{l.qty > 1 ? `${l.qty} × ` : ""}{l.name} <span className="num text-ink-2">at {usd(l.price)}</span></p>
+                <button type="button" className="btn btn-ghost btn-sm" disabled={!!p.busy} onClick={() => void p.unlist(l.mint).then(done)}>{p.busy ?? "Take it back"}</button>
               </li>
             ))}
           </ul>
-        )}
-      </section>
+        </section>
+      )}
 
       <section className="mt-16" aria-labelledby="rounds">
         <h2 id="rounds" className="display text-[clamp(36px,4vw,56px)]">Your rounds</h2>

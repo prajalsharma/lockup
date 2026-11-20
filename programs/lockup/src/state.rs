@@ -154,3 +154,17 @@ pub struct Tap {
     pub last: i64,
     pub bump: u8,
 }
+
+/// One wallet's offer to sell one kind of item it holds. The items wait in a stall owned by
+/// the yard until someone buys them or the seller takes them back.
+#[account]
+#[derive(InitSpace)]
+pub struct Listing {
+    pub yard: Pubkey,
+    pub seller: Pubkey,
+    pub mint: Pubkey,
+    /// Price of one item, in the bid currency's smallest unit.
+    pub price: u64,
+    pub qty: u64,
+    pub bump: u8,
+}

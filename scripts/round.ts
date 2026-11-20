@@ -132,8 +132,10 @@ async function main() {
     const bid = p.bid(unit, kp.publicKey);
     try {
       const seal = await teeBidders[i].methods.sealBid().accountsPartial({ unit, bid, permission: permissionPdaFromAccount(bid), ...perm }).instruction();
+      const sent = Date.now();
       await teeBidders[i].methods.placeBid(new BN(PLAN[i].bid.toString())).accountsPartial({ bidder: kp.publicKey, unit, bid }).postInstructions([seal]).rpc();
-      record(`place_bid + seal_bid ${PLAN[i].label}`, true);
+      // Wall-clock time from sending the sealed bid to the rollup confirming it, network included.
+      record(`place_bid + seal_bid ${PLAN[i].label}`, true, `confirmed in ${Date.now() - sent} ms`);
     } catch (e) { record(`place_bid + seal_bid ${PLAN[i].label}`, false, msg(e)); logs(e); }
   }
 

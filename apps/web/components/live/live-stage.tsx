@@ -249,6 +249,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
                       <span className={`display num text-[40px] leading-none ${unit.value >= unit.winningBid ? "text-accent-text" : "text-bad"}`}>{usd(Math.abs(unit.value - unit.winningBid))}</span>
                     </p>
                   )}
+                  {won && unit.claimed && <Link href="/haul" className="btn btn-ghost mt-5">Keep or sell what you found <span className="arrow" aria-hidden>→</span></Link>}
                   <div className="mt-6 flex flex-wrap gap-3">
                     <Link href="/yard" className="btn btn-primary">Pick another door</Link>
                     <a className="btn btn-ghost" href={explorer(unit.address)} target="_blank" rel="noreferrer">See it on the explorer</a>

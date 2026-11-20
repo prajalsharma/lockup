@@ -10,7 +10,8 @@
     "test:program": "cargo test -p lockup --lib",
     "anchor:build": "anchor build",
     "setup:devnet": "tsx scripts/setup.ts",
-    "round": "tsx scripts/round.ts"
+    "round": "tsx scripts/round.ts",
+    "market": "tsx scripts/market.ts"
   },
   "packageManager": "pnpm@11.20.0",
   "devDependencies": {

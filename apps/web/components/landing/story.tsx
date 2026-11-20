@@ -8,7 +8,7 @@ const STEPS = [
   { title: "Three clues go on the door", body: "The same draw picks three true facts about the unit and pins them up. How many items. What kind. A floor on what it's worth. The rest stays hidden." },
   { title: "You bid in the dark", body: "Your bid is written inside a private rollup. Other bidders can see that you bid. They can't see the number, so nobody can beat you by a dollar at the last second." },
   { title: "The clock runs out", body: "All the bids are read at the same moment. The highest one takes the unit. Everyone else gets their full bid back." },
-  { title: "The door rolls up", body: "The contents move to the winner's wallet on Solana, and the bids are published so the result can be checked." },
+  { title: "The door rolls up", body: "The contents move to the winner's wallet on Solana, and the bids are published so the result can be checked. Keep what you find or sell it piece by piece on the market." },
 ];
 
 export function Story() {

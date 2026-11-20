@@ -15,6 +15,7 @@ export function SiteFooter() {
           <p className="label text-ink-3">Play</p>
           <ul className="mt-4 space-y-2.5">
             <li><Link className="ulink" href="/yard">The yard</Link></li>
+            <li><Link className="ulink" href="/market">Market</Link></li>
             <li><Link className="ulink" href="/haul">My haul</Link></li>
             <li><Link className="ulink" href="/#how">How it works</Link></li>
             <li><Link className="ulink" href="/#limits">What it can't do</Link></li>

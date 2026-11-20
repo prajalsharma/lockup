@@ -8,13 +8,13 @@
  * this browser. Both sign locally; the site never sees a key from an extension.
  */
 import { ConnectionProvider, WalletProvider, useWallet } from "@solana/wallet-adapter-react";
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import nacl from "tweetnacl";
 import dynamic from "next/dynamic";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { EmailWalletCtx, PRIVY_APP_ID } from "./email-wallet";
-import { BID_MINT, RPC, TEE_RPC, USD, VAULT, YARD, bidPda, bidderPda, sleep, unitPda } from "./shared";
+import { BID_MINT, RPC, TEE_RPC, USD, VAULT, YARD, bidPda, bidderPda, listingPda, sleep, stallPda, unitPda } from "./shared";
 
 interface Signer {
   kind: "quick" | "extension" | "email";
@@ -69,6 +69,12 @@ interface PlayerState {
   join(unitId: number, deposit: number): Promise<boolean>;
   bid(unitId: number, amount: number): Promise<boolean>;
   topUp(): Promise<boolean>;
+  /** Put items up for sale at a price each. */
+  sell(mint: string, price: number, qty: number): Promise<boolean>;
+  /** Take a listing down and get the items back. */
+  unlist(mint: string): Promise<boolean>;
+  /** Buy one item from a listing. */
+  buy(l: { seller: string; mint: string; price: number }): Promise<boolean>;
   refresh(): void;
 }
 
@@ -81,6 +87,8 @@ export const usePlayer = () => {
 
 const plain = (e: unknown) => {
   const m = e instanceof Error ? e.message : String(e);
+  if (/caused by account: (listing|stall)[\s\S]*AccountNotInitialized/.test(m)) return "That listing is gone. Someone else just bought it.";
+  if (/Error: insufficient funds|custom program error: 0x1\b/.test(m)) return "Not enough USDC in this wallet for that.";
   const named = /Error Message: ([^.]+)\./.exec(m);
   if (named) return named[1] + ".";
   if (/User rejected|rejected the request|cancel/i.test(m)) return "You cancelled that in your wallet.";
@@ -265,6 +273,41 @@ function Inner({ children }: { children: React.ReactNode }) {
     });
   }), [run, send]);
 
+  const sell = useCallback((mintStr: string, price: number, qty: number) => run("Listing it for sale", async (s) => {
+    const { BN, program } = await chainKit();
+    const mint = new PublicKey(mintStr);
+    const listing = listingPda(s.publicKey, mint);
+    const tx = new Transaction().add(await program(connection, s.publicKey).methods.listItem(new BN(Math.round(price * USD)), new BN(qty))
+      .accountsPartial({ seller: s.publicKey, yard: YARD, itemMint: mint, sellerItemAccount: getAssociatedTokenAddressSync(mint, s.publicKey), listing, stall: stallPda(listing), tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).instruction());
+    await send(s, tx, connection);
+  }), [run, connection, send]);
+
+  const unlist = useCallback((mintStr: string) => run("Taking it back", async (s) => {
+    const { program } = await chainKit();
+    const mint = new PublicKey(mintStr);
+    const listing = listingPda(s.publicKey, mint);
+    const ata = getAssociatedTokenAddressSync(mint, s.publicKey);
+    const tx = new Transaction().add(
+      createAssociatedTokenAccountIdempotentInstruction(s.publicKey, ata, s.publicKey, mint),
+      await program(connection, s.publicKey).methods.cancelListing()
+        .accountsPartial({ seller: s.publicKey, yard: YARD, listing, stall: stallPda(listing), sellerItemAccount: ata, tokenProgram: TOKEN_PROGRAM_ID }).instruction(),
+    );
+    await send(s, tx, connection);
+  }), [run, connection, send]);
+
+  const buy = useCallback((l: { seller: string; mint: string; price: number }) => run("Buying it", async (s) => {
+    const { BN, program } = await chainKit();
+    const mint = new PublicKey(l.mint), seller = new PublicKey(l.seller);
+    const listing = listingPda(seller, mint);
+    const itemAta = getAssociatedTokenAddressSync(mint, s.publicKey);
+    const tx = new Transaction().add(
+      createAssociatedTokenAccountIdempotentInstruction(s.publicKey, itemAta, s.publicKey, mint),
+      await program(connection, s.publicKey).methods.buyItem(new BN(1), new BN(Math.round(l.price * USD)))
+        .accountsPartial({ buyer: s.publicKey, yard: YARD, listing, seller, stall: stallPda(listing), buyerTokenAccount: getAssociatedTokenAddressSync(BID_MINT, s.publicKey), sellerTokenAccount: getAssociatedTokenAddressSync(BID_MINT, seller), buyerItemAccount: itemAta, tokenProgram: TOKEN_PROGRAM_ID }).instruction(),
+    );
+    await send(s, tx, connection);
+  }), [run, connection, send]);
+
   const remember = (m: "quick" | "extension" | "email" | null) => {
     try { if (m) localStorage.setItem(MODE_KEY, m); else localStorage.removeItem(MODE_KEY); } catch { /* ignore */ }
     setMode(m);
@@ -304,7 +347,7 @@ function Inner({ children }: { children: React.ReactNode }) {
       if (mode === "email") void email?.logout().catch(() => undefined);
       remember(null);
     },
-    join, bid, topUp,
+    join, bid, topUp, sell, unlist, buy,
     refresh: () => { if (signer) void refreshFor(signer.publicKey); },
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -60,4 +60,12 @@ pub enum LockupError {
     Overflow,
     #[msg("Stocking failed")]
     StockFailed,
+    #[msg("That item is not in this yard's catalog")]
+    NotInCatalog,
+    #[msg("Price and quantity must be above zero")]
+    BadListing,
+    #[msg("Not that many left in the listing")]
+    NotEnoughListed,
+    #[msg("The price is higher than you agreed to")]
+    PriceChanged,
 }

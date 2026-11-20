@@ -19,6 +19,21 @@ Pins: `anchor-lang 1.0.2`, `ephemeral-rollups-sdk 0.16.2` (features `anchor`, `a
    `claim_lot` moves each lot from the warehouse to the winner. Both are permissionless.
 9. **Stall.** `reclaim_stalled` returns a deposit an hour after joining if the unit has no result on Solana.
 
+## Resale
+
+Item tokens a winner holds can be sold one piece at a time. All three instructions run on Solana.
+
+- `list_item(price, qty)` moves the items into a stall token account owned by the yard and records the
+  price. One listing per seller per item.
+- `buy_item(qty, max_price)` pays the seller directly in the bid currency and moves the items to the
+  buyer in the same instruction. `max_price` protects the buyer from a relist at a higher price. A
+  sold-out listing closes and returns its rent to the seller.
+- `cancel_listing` returns unsold items and closes the listing.
+
+The keeper also acts as a buyer: it takes any listing priced at half the appraisal or less and sends
+the items back to the warehouse that future units are stocked from. That buyer is a rule in the
+keeper, paid from the operator's treasury; the chain does not guarantee it.
+
 ## Accounts
 
 | Account | Lives on | Who can read it | Holds |
@@ -29,6 +44,7 @@ Pins: `anchor-lang 1.0.2`, `ephemeral-rollups-sdk 0.16.2` (features `anchor`, `a
 | `Bidder` | Solana | anyone | one wallet's deposit for one unit |
 | `Manifest` | private rollup | operator | the contents, until close |
 | `Bid` | private rollup | its bidder only | the amount |
+| `Listing` + stall | Solana | anyone | seller, item, price each, quantity; the stall holds the items |
 
 ## What is trusted
 
@@ -40,6 +56,10 @@ Pins: `anchor-lang 1.0.2`, `ephemeral-rollups-sdk 0.16.2` (features `anchor`, `a
   in `apps/web/lib/chain/keeper.ts`, not something the chain enforces.
 
 ## Checked on devnet
+
+`pnpm market` lists, buys, cancels and sells out on devnet, and checks that a buy under the asking
+price, a buy of more than is listed, payment to the wrong wallet, a second listing of the same item
+and a cancel by someone else are all refused.
 
 `pnpm round` drives a whole round with two wallets and asserts every step, including the privacy
 reads and exact settlement amounts. The hosted site has also been played end to end with the in-browser

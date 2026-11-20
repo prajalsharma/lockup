@@ -47,3 +47,17 @@ export interface Haul {
   items: { name: string; id: string; rarity: number; qty: number; value: number; mint: string }[];
   rounds: HaulRound[];
 }
+
+/** One open resale listing, read from Solana. Prices are per item. */
+export interface MarketListing {
+  address: string;
+  seller: string;
+  mint: string;
+  id: string;
+  name: string;
+  rarity: number;
+  /** Appraised value of one item. */
+  value: number;
+  price: number;
+  qty: number;
+}

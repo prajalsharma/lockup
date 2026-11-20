@@ -7,7 +7,7 @@
 //!
 //! | Layer | Instructions |
 //! |---|---|
-//! | Solana | `init_yard`, `add_item`, `faucet`, `create_unit`, `request_draw`, `draw_callback`, `join_unit`, `start_unit`, `delegate_unit`, `settle_bidder`, `claim_lot`, `reclaim_stalled` |
+//! | Solana | `init_yard`, `add_item`, `faucet`, `create_unit`, `request_draw`, `draw_callback`, `join_unit`, `start_unit`, `delegate_unit`, `settle_bidder`, `claim_lot`, `reclaim_stalled`, `list_item`, `buy_item`, `cancel_listing` |
 //! | Private rollup | `init_unit_permission`, `stock_unit`, `seal_manifest`, `place_bid`, `seal_bid`, `close_unit`, `commit_unit` |
 //!
 //! ## How the contents stay hidden and still can't be rigged
@@ -25,7 +25,7 @@
 use anchor_lang::prelude::*;
 use solana_sha256_hasher::hashv;
 use anchor_lang::system_program::{transfer as transfer_lamports, Transfer as LamportsTransfer};
-use anchor_spl::token::{self, Mint, MintTo, Token, TokenAccount, Transfer as SplTransfer};
+use anchor_spl::token::{self, CloseAccount, Mint, MintTo, Token, TokenAccount, Transfer as SplTransfer};
 use ephemeral_rollups_sdk::{
     access_control::{
         instructions::CreateEphemeralPermissionCpi,
@@ -63,6 +63,8 @@ pub const BIDDER_SEED: &[u8] = b"bidder";
 pub const BID_SEED: &[u8] = b"bid";
 pub const MANIFEST_SEED: &[u8] = b"manifest";
 pub const TAP_SEED: &[u8] = b"tap";
+pub const LISTING_SEED: &[u8] = b"listing";
+pub const STALL_SEED: &[u8] = b"stall";
 
 pub const MIN_DURATION: i64 = 20;
 pub const MAX_DURATION: i64 = 900;
@@ -693,6 +695,114 @@ pub mod lockup {
         ctx.accounts.bidder_record.settled = true;
         Ok(())
     }
+
+    // ----------------------------------------------------------- Solana: resale
+
+    /// Put items you hold up for sale at a fixed price each. They move into a stall owned by
+    /// the yard and stay there until bought or taken back.
+    pub fn list_item(ctx: Context<ListItem>, price: u64, qty: u64) -> Result<()> {
+        require!(price > 0 && qty > 0, LockupError::BadListing);
+        let mint = ctx.accounts.item_mint.key();
+        require!(ctx.accounts.yard.catalog.iter().any(|i| i.mint == mint), LockupError::NotInCatalog);
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                SplTransfer {
+                    from: ctx.accounts.seller_item_account.to_account_info(),
+                    to: ctx.accounts.stall.to_account_info(),
+                    authority: ctx.accounts.seller.to_account_info(),
+                },
+            ),
+            qty,
+        )?;
+        let listing = &mut ctx.accounts.listing;
+        listing.yard = ctx.accounts.yard.key();
+        listing.seller = ctx.accounts.seller.key();
+        listing.mint = mint;
+        listing.price = price;
+        listing.qty = qty;
+        listing.bump = ctx.bumps.listing;
+        Ok(())
+    }
+
+    /// Buy `qty` items from a listing. The buyer pays the seller directly; the items leave the
+    /// stall in the same instruction. `max_price` guards against a relist at a higher price.
+    pub fn buy_item(ctx: Context<BuyItem>, qty: u64, max_price: u64) -> Result<()> {
+        let listing = &ctx.accounts.listing;
+        require!(qty > 0 && qty <= listing.qty, LockupError::NotEnoughListed);
+        require!(listing.price <= max_price, LockupError::PriceChanged);
+        let cost = listing.price.checked_mul(qty).ok_or(LockupError::Overflow)?;
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                SplTransfer {
+                    from: ctx.accounts.buyer_token_account.to_account_info(),
+                    to: ctx.accounts.seller_token_account.to_account_info(),
+                    authority: ctx.accounts.buyer.to_account_info(),
+                },
+            ),
+            cost,
+        )?;
+        let id = ctx.accounts.yard.yard_id.to_le_bytes();
+        let bump = [ctx.accounts.yard.bump];
+        let seeds: &[&[u8]] = &[YARD_SEED, &id, &bump];
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.key(),
+                SplTransfer {
+                    from: ctx.accounts.stall.to_account_info(),
+                    to: ctx.accounts.buyer_item_account.to_account_info(),
+                    authority: ctx.accounts.yard.to_account_info(),
+                },
+                &[seeds],
+            ),
+            qty,
+        )?;
+        ctx.accounts.listing.qty -= qty;
+        if ctx.accounts.listing.qty == 0 {
+            // Sold out: close the stall and the listing, and return both rents to the seller.
+            token::close_account(CpiContext::new_with_signer(
+                ctx.accounts.token_program.key(),
+                CloseAccount {
+                    account: ctx.accounts.stall.to_account_info(),
+                    destination: ctx.accounts.seller.to_account_info(),
+                    authority: ctx.accounts.yard.to_account_info(),
+                },
+                &[seeds],
+            ))?;
+            ctx.accounts.listing.close(ctx.accounts.seller.to_account_info())?;
+        }
+        Ok(())
+    }
+
+    /// Take unsold items back and close the listing.
+    pub fn cancel_listing(ctx: Context<CancelListing>) -> Result<()> {
+        let id = ctx.accounts.yard.yard_id.to_le_bytes();
+        let bump = [ctx.accounts.yard.bump];
+        let seeds: &[&[u8]] = &[YARD_SEED, &id, &bump];
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.key(),
+                SplTransfer {
+                    from: ctx.accounts.stall.to_account_info(),
+                    to: ctx.accounts.seller_item_account.to_account_info(),
+                    authority: ctx.accounts.yard.to_account_info(),
+                },
+                &[seeds],
+            ),
+            ctx.accounts.listing.qty,
+        )?;
+        token::close_account(CpiContext::new_with_signer(
+            ctx.accounts.token_program.key(),
+            CloseAccount {
+                account: ctx.accounts.stall.to_account_info(),
+                destination: ctx.accounts.seller.to_account_info(),
+                authority: ctx.accounts.yard.to_account_info(),
+            },
+            &[seeds],
+        ))?;
+        Ok(())
+    }
 }
 
 // ============================================================ account contexts
@@ -969,5 +1079,60 @@ pub struct ReclaimStalled<'info> {
     pub bidder_token_account: Box<Account<'info, TokenAccount>>,
     #[account(mut, seeds = [VAULT_SEED, yard.key().as_ref()], bump, constraint = vault.key() == yard.vault @ LockupError::InvalidAccount)]
     pub vault: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct ListItem<'info> {
+    #[account(mut)]
+    pub seller: Signer<'info>,
+    #[account(seeds = [YARD_SEED, &yard.yard_id.to_le_bytes()], bump = yard.bump)]
+    pub yard: Box<Account<'info, Yard>>,
+    pub item_mint: Box<Account<'info, Mint>>,
+    #[account(mut, constraint = seller_item_account.owner == seller.key() @ LockupError::Unauthorized, constraint = seller_item_account.mint == item_mint.key() @ LockupError::MintMismatch)]
+    pub seller_item_account: Box<Account<'info, TokenAccount>>,
+    /// One listing per seller per item. Cancel it to change the price.
+    #[account(init, payer = seller, space = 8 + Listing::INIT_SPACE, seeds = [LISTING_SEED, yard.key().as_ref(), seller.key().as_ref(), item_mint.key().as_ref()], bump)]
+    pub listing: Box<Account<'info, Listing>>,
+    #[account(init, payer = seller, token::mint = item_mint, token::authority = yard, seeds = [STALL_SEED, listing.key().as_ref()], bump)]
+    pub stall: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct BuyItem<'info> {
+    #[account(mut)]
+    pub buyer: Signer<'info>,
+    #[account(seeds = [YARD_SEED, &yard.yard_id.to_le_bytes()], bump = yard.bump)]
+    pub yard: Box<Account<'info, Yard>>,
+    #[account(mut, seeds = [LISTING_SEED, yard.key().as_ref(), listing.seller.as_ref(), listing.mint.as_ref()], bump = listing.bump)]
+    pub listing: Box<Account<'info, Listing>>,
+    /// CHECK: only receives rent when the listing sells out. Tied to the listing by address.
+    #[account(mut, address = listing.seller @ LockupError::InvalidAccount)]
+    pub seller: UncheckedAccount<'info>,
+    #[account(mut, seeds = [STALL_SEED, listing.key().as_ref()], bump)]
+    pub stall: Box<Account<'info, TokenAccount>>,
+    #[account(mut, constraint = buyer_token_account.owner == buyer.key() @ LockupError::Unauthorized, constraint = buyer_token_account.mint == yard.bid_mint @ LockupError::MintMismatch)]
+    pub buyer_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(mut, constraint = seller_token_account.owner == listing.seller @ LockupError::Unauthorized, constraint = seller_token_account.mint == yard.bid_mint @ LockupError::MintMismatch)]
+    pub seller_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(mut, constraint = buyer_item_account.owner == buyer.key() @ LockupError::Unauthorized, constraint = buyer_item_account.mint == listing.mint @ LockupError::MintMismatch)]
+    pub buyer_item_account: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct CancelListing<'info> {
+    #[account(mut)]
+    pub seller: Signer<'info>,
+    #[account(seeds = [YARD_SEED, &yard.yard_id.to_le_bytes()], bump = yard.bump)]
+    pub yard: Box<Account<'info, Yard>>,
+    #[account(mut, close = seller, has_one = seller @ LockupError::Unauthorized, seeds = [LISTING_SEED, yard.key().as_ref(), seller.key().as_ref(), listing.mint.as_ref()], bump = listing.bump)]
+    pub listing: Box<Account<'info, Listing>>,
+    #[account(mut, seeds = [STALL_SEED, listing.key().as_ref()], bump)]
+    pub stall: Box<Account<'info, TokenAccount>>,
+    #[account(mut, constraint = seller_item_account.owner == seller.key() @ LockupError::Unauthorized, constraint = seller_item_account.mint == listing.mint @ LockupError::MintMismatch)]
+    pub seller_item_account: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
 }

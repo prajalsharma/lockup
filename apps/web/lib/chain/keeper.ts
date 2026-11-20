@@ -20,7 +20,7 @@ import nacl from "tweetnacl";
 import idl from "./idl.json";
 import {
   BID_MINT, DELEGATION_PROGRAM, ITEMS, PROGRAM, RPC, TEE_RPC, TEE_VALIDATOR, USD, VAULT, VRF_QUEUE, YARD,
-  bidPda, bidderPda, manifestPda, unitPda, warehousePda,
+  HOUSE_BUY_SHARE, bidPda, bidderPda, manifestPda, stallPda, unitPda, warehousePda,
 } from "./shared";
 
 const TARGET_OPEN = 3;
@@ -283,6 +283,23 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
           .accountsPartial({ authority: k.keeper.publicKey, yard: YARD, unit: key, systemProgram: SystemProgram.programId }).postInstructions([draw]).rpc();
       });
     }
+
+    // The yard buys cheap listings and puts the items back in the warehouse future units are stocked from.
+    const offers = await readListings();
+    const cheap = offers.find((l) => !l.seller.equals(k.keeper.publicKey) && l.price <= l.value * HOUSE_BUY_SHARE);
+    if (cheap) {
+      const float = await connection.getTokenAccountBalance(treasury).then((b) => Number(b.value.amount), () => 0);
+      const qty = Math.min(cheap.qty, 3);
+      if (float >= 3 * USD + cheap.price * qty) {
+        await step(`house buys ${qty} from ${cheap.key.toBase58().slice(0, 6)}`, async () => {
+          const ata = getAssociatedTokenAddressSync(cheap.mint, k.keeper.publicKey);
+          await p.methods.buyItem(new BN(qty), new BN(cheap.price))
+            .accountsPartial({ buyer: k.keeper.publicKey, yard: YARD, listing: cheap.key, seller: cheap.seller, stall: stallPda(cheap.key), buyerTokenAccount: treasury, sellerTokenAccount: getAssociatedTokenAddressSync(BID_MINT, cheap.seller), buyerItemAccount: ata, tokenProgram: TOKEN_PROGRAM_ID })
+            .preInstructions([createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, ata, k.keeper.publicKey, cheap.mint)])
+            .postInstructions([createTransferInstruction(ata, warehousePda(cheap.mint), k.keeper.publicKey, qty)]).rpc();
+        });
+      }
+    }
   } catch (e) {
     report.errors.push(`tick: ${(e instanceof Error ? e.message : String(e)).split("\n")[0].slice(0, 200)}`);
   } finally {
@@ -327,4 +344,21 @@ export async function drip(k: Keeper, to: PublicKey): Promise<DripResult> {
     await prog(connection, k.keeper).provider.sendAndConfirm!(tx);
   }
   return out;
+}
+
+export interface ListingView { key: PublicKey; seller: PublicKey; mint: PublicKey; item: number; price: number; qty: number; /** Appraised value of one item, in the bid currency's smallest unit. */ value: number }
+const LISTING_SIZE = 121; // 8 discriminator + yard 32 + seller 32 + mint 32 + price 8 + qty 8 + bump 1
+/** Every open resale listing in this yard. */
+export async function readListings(): Promise<ListingView[]> {
+  const coder = prog(connection, Keypair.generate()).coder.accounts;
+  const found = await connection.getProgramAccounts(PROGRAM, { filters: [{ dataSize: LISTING_SIZE }, { memcmp: { offset: 8, bytes: YARD.toBase58() } }] });
+  const out: ListingView[] = [];
+  for (const a of found) {
+    let l: any;
+    try { l = coder.decode("listing", a.account.data); } catch { continue; }
+    const item = ITEMS.findIndex((i) => i.mint === l.mint.toBase58());
+    if (item < 0) continue;
+    out.push({ key: a.pubkey, seller: l.seller, mint: l.mint, item, price: Number(l.price), qty: Number(l.qty), value: (ITEMS[item].value * USD) / 100 });
+  }
+  return out.sort((a, b) => a.price / a.value - b.price / b.value);
 }
