@@ -90,8 +90,11 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const lots = closed ? unit.lots : null;
   const onFound = (i: number) => setFound((f) => { if (f[i]) return f; sfx.clue(); const n = [...f]; n[i] = true; return n; });
   const maxBid = mine ? mine.deposit : 0;
+  const bidAmt = maxBid > 0 ? Math.min(maxBid, amount) : amount;
   // You can deposit up to what the wallet holds, capped at $5 so one unit can't swallow a balance.
-  const depositCap = Math.max(unit.minBid, Math.min(5, Math.floor((p.dollars ?? 1) * 20) / 20));
+  // A wallet with no USDC yet is sent 1 USDC when it lines up, so plan around that.
+  const spendable = p.dollars && p.dollars > 0 ? p.dollars : 1;
+  const depositCap = Math.max(unit.minBid, Math.min(5, Math.floor(spendable * 20) / 20));
 
   let phaseLabel = "Line is open";
   let big = "—";
@@ -131,7 +134,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
           {unit.status === "created" && <Step title="Drawing the contents">MagicBlock VRF is picking this unit's random number. It takes a few seconds.</Step>}
 
           {unit.status === "open" && me && !mine && (
-            <form onSubmit={(e) => { e.preventDefault(); void p.join(unit.id, deposit).then((ok) => ok && sfx.lock()); }}>
+            <form noValidate onSubmit={(e) => { e.preventDefault(); void p.join(unit.id, Math.min(depositCap, deposit)).then((ok) => ok && sfx.lock()); }}>
               <div className="flex items-end justify-between gap-4">
                 <label htmlFor="deposit" className="label text-ink-3">Your deposit</label>
                 <span className="label num text-ink-3">Lowest bid {usd(unit.minBid)}</span>
@@ -171,17 +174,17 @@ export function LiveStage({ unitId }: { unitId: number }) {
           )}
 
           {biddingOpen && mine && !mine.hasBid && (
-            <form onSubmit={(e) => { e.preventDefault(); void p.bid(unit.id, amount).then((ok) => ok && sfx.lock()); }}>
+            <form noValidate onSubmit={(e) => { e.preventDefault(); void p.bid(unit.id, bidAmt).then((ok) => ok && sfx.lock()); }}>
               <div className="flex items-end justify-between gap-4">
                 <label htmlFor="bid" className="label text-ink-3">Your sealed bid</label>
                 <span className="label num text-ink-3">{usd(unit.minBid)} to {usd(maxBid)}</span>
               </div>
               <div className="mt-2 flex items-baseline gap-1">
                 <span className="display text-[56px] text-ink-3">$</span>
-                <input id="bid" type="number" inputMode="decimal" step="0.05" min={unit.minBid} max={maxBid} value={amount} onChange={(e) => setAmount(Math.min(maxBid, Math.max(0, Number(e.target.value) || 0)))} className="display num w-full bg-transparent text-[72px] leading-none outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none" />
+                <input id="bid" type="number" inputMode="decimal" step="0.05" min={unit.minBid} max={maxBid} value={bidAmt} onChange={(e) => setAmount(Math.min(maxBid, Math.max(0, Number(e.target.value) || 0)))} className="display num w-full bg-transparent text-[72px] leading-none outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none" />
               </div>
               <input type="range" className="bid mt-1" min={unit.minBid} max={maxBid} step={0.05} value={Math.min(maxBid, Math.max(unit.minBid, amount))} onChange={(e) => setAmount(Number(e.target.value))} aria-label="Bid amount" />
-              <button type="submit" className="btn btn-primary mt-4 w-full" disabled={!!p.busy || amount < unit.minBid || amount > maxBid}>{p.busy ?? "Seal my bid"} {!p.busy && <span className="arrow" aria-hidden>→</span>}</button>
+              <button type="submit" className="btn btn-primary mt-4 w-full" disabled={!!p.busy || bidAmt < unit.minBid}>{p.busy ?? "Seal my bid"} {!p.busy && <span className="arrow" aria-hidden>→</span>}</button>
               <p className="mt-3 text-sm text-ink-2">Your bid goes to MagicBlock's private rollup. Nobody else can read it until the door opens.{!p.isQuick && " Your wallet will ask you to sign a message to open the rollup, then to approve the bid."}</p>
             </form>
           )}

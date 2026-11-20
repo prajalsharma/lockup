@@ -316,7 +316,7 @@ export async function drip(k: Keeper, to: PublicKey): Promise<DripResult> {
   }
   if (!theirAta) {
     // Keep enough back to fund the house bidders.
-    if (float < 6 * USD) out.usdc = "empty";
+    if (float < 3 * USD) out.usdc = "empty";
     else {
       tx.add(createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, ata, to, BID_MINT), createTransferInstruction(treasury, ata, k.keeper.publicKey, STARTER_USDC));
       out.usdc = "sent";
