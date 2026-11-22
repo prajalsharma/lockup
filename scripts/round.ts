@@ -12,7 +12,7 @@ import { BN } from "@coral-xyz/anchor";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, getOrCreateAssociatedTokenAccount, transfer } from "@solana/spl-token";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import {
-  EPHEMERAL_VAULT_ID, MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID, PERMISSION_PROGRAM_ID, permissionPdaFromAccount,
+  EPHEMERAL_VAULT_ID, MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID, PERMISSION_PROGRAM_ID, createTopUpEscrowInstruction, escrowPdaFromEscrowAuthority, permissionPdaFromAccount,
 } from "@magicblock-labs/ephemeral-rollups-sdk";
 import {
   CATALOG, RPC, TEE_VALIDATOR, USD, VRF_QUEUE, cachedKeypair, loadIdl, loadKeypair, pdas, programFor, sleep, teeConnection, tx,
@@ -216,31 +216,62 @@ async function main() {
   console.log("    winner:", u.winner.toBase58(), "bid", Number(u.winningBid) / 1e6, "value $" + (u.value / 100).toFixed(2));
   console.log("    lots:", u.lots.map((l: any) => `${l.qty}× ${CATALOG[l.item].name}`).join(", "));
 
+  // Balances before anything is paid, so the payouts can be measured however they arrive.
+  const balance = async (i: number) => BigInt((await connection.getTokenAccountBalance(atas[i])).value.amount);
+  const startBal = [await balance(0), await balance(1)];
+  const ACTIONS = process.env.ACTIONS !== "0";
   try {
-    const s = await teeOp.methods.commitUnit().accountsPartial({ payer: operator.publicKey, authority: operator.publicKey, unit, magicContext: MAGIC_CONTEXT_ID, magicProgram: MAGIC_PROGRAM_ID }).rpc({ skipPreflight: true });
-    record("commit_unit sent", true, s);
-  } catch (e) { record("commit_unit", false, msg(e)); logs(e); return finish(); }
+    if (ACTIONS) {
+      // Magic Actions are paid for from an escrow on Solana that belongs to the operator.
+      const escrow = escrowPdaFromEscrowAuthority(operator.publicKey);
+      if ((await connection.getBalance(escrow)) < 0.005 * LAMPORTS_PER_SOL) {
+        await retry(() => program.provider.sendAndConfirm!(new Transaction().add(createTopUpEscrowInstruction(escrow, operator.publicKey, operator.publicKey, 0.02 * LAMPORTS_PER_SOL))));
+        record("action fee escrow topped up", true);
+      }
+      const s = await teeOp.methods.commitAndSettle()
+        .accountsPartial({ payer: operator.publicKey, authority: operator.publicKey, unit, yard: p.yard, vault: p.vault, tokenProgram: TOKEN_PROGRAM_ID, magicContext: MAGIC_CONTEXT_ID, magicProgram: MAGIC_PROGRAM_ID })
+        .remainingAccounts(atas.map((pubkey) => ({ pubkey, isSigner: false, isWritable: false }))).rpc();
+      record("commit_and_settle sent (commit + one Magic Action per bidder)", true, s);
+    } else {
+      const s = await teeOp.methods.commitUnit().accountsPartial({ payer: operator.publicKey, authority: operator.publicKey, unit, magicContext: MAGIC_CONTEXT_ID, magicProgram: MAGIC_PROGRAM_ID }).rpc({ skipPreflight: true });
+      record("commit_unit sent", true, s);
+    }
+  } catch (e) { record(ACTIONS ? "commit_and_settle" : "commit_unit", false, msg(e)); logs(e); return finish(); }
 
   head("Solana: wait for the commit, settle, claim");
   let back = false;
-  for (let i = 0; i < 40 && !back; i++) {
-    await sleep(3000);
+  const sentAt = Date.now();
+  for (let i = 0; i < 60 && !back; i++) {
+    await sleep(2000);
     const info = await retry(() => connection.getAccountInfo(unit));
     back = !!info && info.owner.equals(programId);
   }
-  record("unit is back on Solana", back);
+  record("unit is back on Solana", back, `${((Date.now() - sentAt) / 1000).toFixed(0)} s`);
   if (!back) return finish();
   u = await (program.account as any).unit.fetch(unit);
   record("unit on Solana is Closed", "closed" in u.status);
 
+  const owed = (i: number) => ((u.winner as PublicKey).equals(wallets[i].publicKey) ? PLAN[i].deposit - PLAN[i].bid : PLAN[i].deposit);
+  if (ACTIONS) {
+    // Nobody sends a settlement transaction here. The payouts should arrive on their own.
+    let done = [false, false];
+    for (let t = 0; t < 30 && !(done[0] && done[1]); t++) {
+      await sleep(2000);
+      const recs = await (program.account as any).bidder.fetchMultiple(wallets.map((k) => p.bidder(unit, k.publicKey)));
+      done = recs.map((r: any) => !!r?.settled);
+    }
+    for (const [i] of wallets.entries()) {
+      const got = (await balance(i)) - startBal[i];
+      record(`${PLAN[i].label} was paid by a Magic Action, with no settlement transaction from anyone`, done[i] && got === owed(i), `got ${Number(got) / 1e6}, expected ${Number(owed(i)) / 1e6}, ${((Date.now() - sentAt) / 1000).toFixed(0)} s after the commit was sent`);
+    }
+  }
   for (const [i, kp] of wallets.entries()) {
-    const before = BigInt((await connection.getTokenAccountBalance(atas[i])).value.amount);
+    const rec = await (program.account as any).bidder.fetch(p.bidder(unit, kp.publicKey));
+    if (rec.settled) continue;
     try {
       await retry(() => program.methods.settleBidder().accountsPartial({ crank: operator.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, kp.publicKey), bidderTokenAccount: atas[i], vault: p.vault, tokenProgram: TOKEN_PROGRAM_ID }).rpc());
-      const after = BigInt((await connection.getTokenAccountBalance(atas[i])).value.amount);
-      const won = (u.winner as PublicKey).equals(kp.publicKey);
-      const want = won ? PLAN[i].deposit - PLAN[i].bid : PLAN[i].deposit;
-      record(`settle ${PLAN[i].label} (${won ? "winner" : "refund"})`, after - before === want, `got ${Number(after - before) / 1e6}, expected ${Number(want) / 1e6}`);
+      const got = (await balance(i)) - startBal[i];
+      record(`settle ${PLAN[i].label} by hand (${owed(i) === PLAN[i].deposit ? "refund" : "winner"})`, got === owed(i), `got ${Number(got) / 1e6}, expected ${Number(owed(i)) / 1e6}`);
     } catch (e) { record(`settle ${PLAN[i].label}`, false, msg(e)); logs(e); }
     await sleep(800);
   }

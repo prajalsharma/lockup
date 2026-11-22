@@ -14,7 +14,7 @@ import { AnchorProvider, BN, Program, type Idl } from "@coral-xyz/anchor";
 import { TOKEN_PROGRAM_ID, createAssociatedTokenAccountIdempotentInstruction, createTransferInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, VersionedTransaction } from "@solana/web3.js";
 import {
-  EPHEMERAL_VAULT_ID, MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID, PERMISSION_PROGRAM_ID, getAuthToken, permissionPdaFromAccount,
+  EPHEMERAL_VAULT_ID, MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID, PERMISSION_PROGRAM_ID, createTopUpEscrowInstruction, escrowPdaFromEscrowAuthority, getAuthToken, permissionPdaFromAccount,
 } from "@magicblock-labs/ephemeral-rollups-sdk";
 import nacl from "tweetnacl";
 import idl from "./idl.json";
@@ -32,6 +32,11 @@ const finished = new Set<number>();
 /** When each unit's draw was last re-requested, and which listings the house buyer recently failed on. */
 const redraw = new Map<number, number>();
 const skipListing = new Map<string, number>();
+// The operator's fee escrow for Magic Actions, on Solana. Each payout action costs a few thousand lamports.
+const ACTION_ESCROW_MIN = 0.005 * LAMPORTS_PER_SOL;
+const ACTION_ESCROW_TOPUP = 0.02 * LAMPORTS_PER_SOL;
+// How long after a unit's clock the payout actions are given before the keeper pays by hand.
+const ACTION_GRACE_SECONDS = 25;
 const LINE_SECONDS = 15; // wait after the first player joins before the door locks
 // Stakes are in Circle devnet USDC and deliberately small: the whole yard runs on a float of about 20 USDC.
 const MIN_BID = 0.1 * USD;
@@ -160,6 +165,23 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
     const now = Math.floor(Date.now() / 1000);
     const waiting = { solo: 0, multi: 0 };
 
+    // Send a closed unit back to Solana. The commit carries one Magic Action per bidder, so
+    // MagicBlock pays every refund and the winner's change as soon as the unit lands, with no
+    // settlement transaction from us. If that cannot be sent, a plain commit goes instead and the
+    // payouts are made by hand further down.
+    const commit = async (tp: Program, id: number, key: PublicKey, u: any) => {
+      const sent = await step(`commit unit ${id} with a payout action per bidder`, async () => {
+        const escrow = escrowPdaFromEscrowAuthority(k.keeper.publicKey);
+        if ((await connection.getBalance(escrow)) < ACTION_ESCROW_MIN) {
+          await p.provider.sendAndConfirm!(new Transaction().add(createTopUpEscrowInstruction(escrow, k.keeper.publicKey, k.keeper.publicKey, ACTION_ESCROW_TOPUP)));
+        }
+        await tp.methods.commitAndSettle()
+          .accountsPartial({ payer: k.keeper.publicKey, authority: k.keeper.publicKey, unit: key, yard: YARD, vault: VAULT, tokenProgram: TOKEN_PROGRAM_ID, magicContext: MAGIC_CONTEXT_ID, magicProgram: MAGIC_PROGRAM_ID })
+          .remainingAccounts(u.slots.map((s: any) => ({ pubkey: getAssociatedTokenAddressSync(BID_MINT, s.bidder), isSigner: false, isWritable: false }))).rpc();
+      });
+      if (!sent) await step(`commit unit ${id}`, () => tp.methods.commitUnit().accountsPartial({ payer: k.keeper.publicKey, authority: k.keeper.publicKey, unit: key, magicContext: MAGIC_CONTEXT_ID, magicProgram: MAGIC_PROGRAM_ID }).rpc({ skipPreflight: true }));
+    };
+
     // Oldest unfinished first, so a round in progress is never starved by newer units.
     const queue = units.filter((x) => !finished.has(x.id)).sort((a, b) => Number(status(a.u) === "closed") - Number(status(b.u) === "closed") || a.id - b.id);
     for (const { id, key, onRollup, u } of queue) {
@@ -264,7 +286,7 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
           const bids = u.slots.filter((s: any) => s.hasBid).map((s: any) => bidPda(key, s.bidder));
           const ok = await step(`close unit ${id}`, () => tp.methods.closeUnit().accountsPartial({ authority: k.keeper.publicKey, unit: key })
             .remainingAccounts([manifest, ...bids].map((pubkey) => ({ pubkey, isSigner: false, isWritable: false }))).rpc());
-          if (ok) await step(`commit unit ${id}`, () => tp.methods.commitUnit().accountsPartial({ payer: k.keeper.publicKey, authority: k.keeper.publicKey, unit: key, magicContext: MAGIC_CONTEXT_ID, magicProgram: MAGIC_PROGRAM_ID }).rpc({ skipPreflight: true }));
+          if (ok) await commit(tp, id, key, u);
         }
         continue;
       }
@@ -272,7 +294,7 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
       if (st === "closed" && onRollup) {
         // Closed on the rollup but not yet back on Solana: (re)send the commit.
         const tp = prog(await tee(k.keeper), k.keeper);
-        await step(`commit unit ${id}`, () => tp.methods.commitUnit().accountsPartial({ payer: k.keeper.publicKey, authority: k.keeper.publicKey, unit: key, magicContext: MAGIC_CONTEXT_ID, magicProgram: MAGIC_PROGRAM_ID }).rpc({ skipPreflight: true }));
+        await commit(tp, id, key, u);
         continue;
       }
 
@@ -286,6 +308,8 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
         // A winner who took a stalled deposit back never paid, so there is nothing to deliver.
         const voided = !!winnerRecord && winnerRecord.settled && !winnerRecord.won;
         if (!unsettled.length && (allClaimed || voided)) { finished.add(id); continue; }
+        // Give the Magic Actions scheduled with the commit time to pay before stepping in.
+        if (unsettled.length && now < Number(u.closesAt) + ACTION_GRACE_SECONDS) continue;
         for (const s of unsettled) {
           await step(`settle ${s.bidder.toBase58().slice(0, 4)} on unit ${id}`, () => p.methods.settleBidder()
             .accountsPartial({ crank: k.keeper.publicKey, yard: YARD, unit: key, bidderRecord: bidderPda(key, s.bidder), bidderTokenAccount: getAssociatedTokenAddressSync(BID_MINT, s.bidder), vault: VAULT, tokenProgram: TOKEN_PROGRAM_ID }).rpc());

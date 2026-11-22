@@ -17,7 +17,7 @@ export const FLOW = [
   { where: "Private rollup", title: "The unit is filled", body: "Inside the rollup, the random bytes and our secret number decide what the unit holds. Three true clues go up on the door.", you: "Read the clues." },
   { where: "Private rollup", title: "You seal a bid", body: "Your bid is written inside the rollup in about half a second. Others can see that you bid. Only you can see how much.", you: "Pick a number and press Seal my bid." },
   { where: "Private rollup → Solana", title: "The clock runs out", body: "Every bid is opened at the same moment and the highest one wins. The rollup sends the result back to Solana.", you: null },
-  { where: "Solana", title: "Everyone is paid", body: "On Solana, the winner gets the items and their change, and everyone else gets their whole deposit back. We are paid the winning bid only after every item is delivered. Keep the items or sell them.", you: "Keep what you found or sell it." },
+  { where: "Solana", title: "Everyone is paid", body: "The moment the unit lands back on Solana, MagicBlock itself pays everyone: the winner's change and every other deposit in full, with no transaction from us. Then the items are delivered, and only after that are we paid the winning bid.", you: "Keep what you found or sell it." },
 ] as const;
 
 const WIDE = { W: 1000, H: 430, sol: 330, roll: 168, xs: [90, 230, 370, 510, 603, 696, 790, 925], box: [440, 44, 432, 196], vrf: [340, 92], vw: 172, f: 13, cw: 46, name: "MAGICBLOCK PRIVATE ROLLUP", note: "sealed from outside", sub: "the base chain · public · holds the money and the final result" };

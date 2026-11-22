@@ -7,8 +7,8 @@
 //!
 //! | Layer | Instructions |
 //! |---|---|
-//! | Solana | `init_yard`, `add_item`, `create_unit`, `join_unit`, `start_unit` (locks the line and requests the VRF draw), `draw_callback`, `request_draw` (retry only), `delegate_unit`, `settle_bidder`, `claim_lot`, `reclaim_stalled`, `list_item`, `buy_item`, `cancel_listing` |
-//! | Private rollup | `init_unit_permission`, `stock_unit`, `seal_manifest`, `place_bid`, `seal_bid`, `close_unit`, `commit_unit` |
+//! | Solana | `init_yard`, `add_item`, `create_unit`, `join_unit`, `start_unit` (locks the line and requests the VRF draw), `draw_callback`, `request_draw` (retry only), `delegate_unit`, `settle_bidder`, `settle_on_commit` (Magic Action), `claim_lot`, `reclaim_stalled`, `list_item`, `buy_item`, `cancel_listing` |
+//! | Private rollup | `init_unit_permission`, `stock_unit`, `seal_manifest`, `place_bid`, `seal_bid`, `close_unit`, `commit_unit`, `commit_and_settle` (commit plus a Magic Action per bidder that pays them on Solana) |
 //!
 //! ## How the contents stay hidden and still can't be rigged
 //!
@@ -34,16 +34,18 @@ use ephemeral_rollups_sdk::{
             TX_BALANCES_FLAG, TX_LOGS_FLAG, TX_MESSAGE_FLAG,
         },
     },
-    anchor::{commit, delegate, ephemeral, ephemeral_accounts, vrf, vrf_callback},
+    anchor::{action, commit, delegate, ephemeral, ephemeral_accounts, vrf, vrf_callback},
     consts::{EPHEMERAL_VAULT_ID, MAGIC_PROGRAM_ID, PERMISSION_PROGRAM_ID},
     cpi::DelegateConfig,
-    ephem::MagicIntentBundleBuilder,
+    ephem::{CallHandler, MagicIntentBundleBuilder},
     vrf::{
         consts::{DEFAULT_QUEUE, DEFAULT_TEST_QUEUE},
         instructions::{create_request_scoped_randomness_ix, RequestRandomnessParams},
         types::SerializableAccountMeta,
     },
 };
+
+use ephemeral_rollups_sdk::{ActionArgs, ShortAccountMeta};
 
 pub mod engine;
 pub mod error;
@@ -74,6 +76,10 @@ pub const RECLAIM_SECONDS: i64 = 3600;
 pub const TEE_VALIDATOR: Pubkey = pubkey!("MTEWGuqxUpYZGFJQcp8tLN7x5v9BSeoFHYWQQ3n3xzo");
 /// Bit of `claimed_mask` set once the winning bid has been paid to the operator.
 pub const BID_PAID: u8 = 1 << 7;
+/// Escrow index `ActionArgs::new` uses for the fees of actions scheduled at commit.
+pub const ACTION_ESCROW_INDEX: u8 = 255;
+/// Compute budget for one bidder's payout when it runs as a Magic Action.
+pub const SETTLE_ACTION_UNITS: u32 = 120_000;
 
 fn draw_request(payer: Pubkey, oracle_queue: Pubkey, unit: Pubkey) -> anchor_lang::solana_program::instruction::Instruction {
     create_request_scoped_randomness_ix(RequestRandomnessParams {
@@ -85,6 +91,35 @@ fn draw_request(payer: Pubkey, oracle_queue: Pubkey, unit: Pubkey) -> anchor_lan
         accounts_metas: Some(vec![SerializableAccountMeta { pubkey: unit, is_signer: false, is_writable: true }]),
         ..Default::default()
     })
+}
+
+/// Pay one bidder what they are owed and mark their record. The winning bid is not paid out
+/// here: it stays in the vault until the last lot has been delivered (`claim_lot`), so the
+/// operator is paid only after the winner has everything.
+fn pay_bidder<'info>(
+    yard: &Account<'info, Yard>,
+    unit: &Account<'info, Unit>,
+    record: &mut Account<'info, Bidder>,
+    bidder_token_account: AccountInfo<'info>,
+    vault: AccountInfo<'info>,
+    token_program: Pubkey,
+) -> Result<()> {
+    require!(unit.status == UnitStatus::Closed, LockupError::WrongStatus);
+    require!(!record.settled, LockupError::AlreadySettled);
+    let won = unit.winner == record.bidder && unit.winner != Pubkey::default();
+    let payout = if won { record.deposit.checked_sub(unit.winning_bid).ok_or(LockupError::Overflow)? } else { record.deposit };
+    if payout > 0 {
+        let id = yard.yard_id.to_le_bytes();
+        let bump = [yard.bump];
+        let seeds: &[&[u8]] = &[YARD_SEED, &id, &bump];
+        token::transfer(
+            CpiContext::new_with_signer(token_program, SplTransfer { from: vault, to: bidder_token_account, authority: yard.to_account_info() }, &[seeds]),
+            payout,
+        )?;
+    }
+    record.settled = true;
+    record.won = won;
+    Ok(())
 }
 
 fn reader(pubkey: Pubkey) -> Member {
@@ -563,47 +598,75 @@ pub mod lockup {
         Ok(())
     }
 
+    /// `commit_unit`, plus a Magic Action per bidder: as soon as the unit is back on Solana,
+    /// MagicBlock runs `settle_on_commit` for each of them, so refunds and the winner's change
+    /// arrive without anyone sending a settlement transaction. Remaining accounts are the
+    /// bidders' token accounts in line order. The actions are not atomic with the commit; if one
+    /// fails, `settle_bidder` still works.
+    pub fn commit_and_settle<'info>(ctx: Context<'info, CommitAndSettle<'info>>) -> Result<()> {
+        let unit: Unit = read_account(&ctx.accounts.unit.to_account_info())?;
+        let expected = Pubkey::find_program_address(&[UNIT_SEED, unit.yard.as_ref(), &unit.unit_id.to_le_bytes()], ctx.program_id).0;
+        require_keys_eq!(ctx.accounts.unit.key(), expected, LockupError::InvalidAccount);
+        require!(unit.status == UnitStatus::Closed, LockupError::WrongStatus);
+        require_keys_eq!(unit.authority, ctx.accounts.authority.key(), LockupError::Unauthorized);
+        require_keys_eq!(unit.yard, ctx.accounts.yard.key(), LockupError::InvalidAccount);
+        require!(ctx.remaining_accounts.len() == unit.slots.len(), LockupError::BidCountMismatch);
+
+        let unit_key = ctx.accounts.unit.key();
+        let data = anchor_lang::InstructionData::data(&crate::instruction::SettleOnCommit {});
+        let meta = |pubkey: Pubkey, is_writable: bool| ShortAccountMeta { pubkey: pubkey.to_bytes().into(), is_writable };
+        let actions: Vec<CallHandler> = unit
+            .slots
+            .iter()
+            .zip(ctx.remaining_accounts.iter())
+            .map(|(slot, token_account)| {
+                let record = Pubkey::find_program_address(&[BIDDER_SEED, unit_key.as_ref(), slot.bidder.as_ref()], ctx.program_id).0;
+                CallHandler {
+                    destination_program: crate::ID,
+                    accounts: vec![
+                        meta(ctx.accounts.yard.key(), false),
+                        meta(unit_key, false),
+                        meta(record, true),
+                        meta(token_account.key(), true),
+                        meta(ctx.accounts.vault.key(), true),
+                        meta(ctx.accounts.token_program.key(), false),
+                    ],
+                    args: ActionArgs::new(data.clone()),
+                    // Fees for the actions come from the operator's escrow on Solana.
+                    escrow_authority: ctx.accounts.payer.to_account_info(),
+                    compute_units: SETTLE_ACTION_UNITS,
+                }
+            })
+            .collect();
+
+        MagicIntentBundleBuilder::new(
+            ctx.accounts.payer.to_account_info(),
+            ctx.accounts.magic_context.to_account_info(),
+            ctx.accounts.magic_program.to_account_info(),
+        )
+        .commit_and_undelegate(&[ctx.accounts.unit.to_account_info()])
+        .add_post_undelegate_actions(actions)
+        .build_and_invoke()?;
+        Ok(())
+    }
+
     // ------------------------------------------------------- Solana: settlement
 
     /// Pay one bidder what they are owed. Anyone can run it: the numbers come from the unit.
     /// The winner gets their deposit minus the winning bid. Everyone else gets it all back.
     /// The winning bid itself waits in the vault for `claim_lot`.
     pub fn settle_bidder(ctx: Context<SettleBidder>) -> Result<()> {
-        let unit = &ctx.accounts.unit;
-        require!(unit.status == UnitStatus::Closed, LockupError::WrongStatus);
-        let record = &ctx.accounts.bidder_record;
-        require!(!record.settled, LockupError::AlreadySettled);
+        let a = ctx.accounts;
+        pay_bidder(&a.yard, &a.unit, &mut a.bidder_record, a.bidder_token_account.to_account_info(), a.vault.to_account_info(), a.token_program.key())
+    }
 
-        let won = unit.winner == record.bidder && unit.winner != Pubkey::default();
-        let payout = if won {
-            record.deposit.checked_sub(unit.winning_bid).ok_or(LockupError::Overflow)?
-        } else {
-            record.deposit
-        };
-
-        let id = ctx.accounts.yard.yard_id.to_le_bytes();
-        let bump = [ctx.accounts.yard.bump];
-        let seeds: &[&[u8]] = &[YARD_SEED, &id, &bump];
-        // The winning bid is not paid out here. It stays in the vault until the last lot has been
-        // delivered (`claim_lot`), so the operator is paid only after the winner has everything.
-        if payout > 0 {
-            token::transfer(
-                CpiContext::new_with_signer(
-                    ctx.accounts.token_program.key(),
-                    SplTransfer {
-                        from: ctx.accounts.vault.to_account_info(),
-                        to: ctx.accounts.bidder_token_account.to_account_info(),
-                        authority: ctx.accounts.yard.to_account_info(),
-                    },
-                    &[seeds],
-                ),
-                payout,
-            )?;
-        }
-        let record = &mut ctx.accounts.bidder_record;
-        record.settled = true;
-        record.won = won;
-        Ok(())
+    /// The same payout as `settle_bidder`, run by MagicBlock as a Magic Action the moment the
+    /// unit is back on Solana. Scheduled by `commit_and_settle`, one per bidder. Only the action
+    /// path can call it: it requires the fee escrow that only MagicBlock's delegation program
+    /// can sign for.
+    pub fn settle_on_commit(ctx: Context<SettleOnCommit>) -> Result<()> {
+        let a = ctx.accounts;
+        pay_bidder(&a.yard, &a.unit, &mut a.bidder_record, a.bidder_token_account.to_account_info(), a.vault.to_account_info(), a.token_program.key())
     }
 
     /// Move one lot of the contents from the warehouse to the winner. Anyone can run it.
@@ -1035,6 +1098,48 @@ pub struct CommitUnit<'info> {
     /// CHECK: validated by hand in the handler; see `commit_unit`.
     #[account(mut)]
     pub unit: UncheckedAccount<'info>,
+}
+
+#[commit]
+#[derive(Accounts)]
+pub struct CommitAndSettle<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub authority: Signer<'info>,
+    /// CHECK: validated by hand in the handler; see `commit_unit`.
+    #[account(mut)]
+    pub unit: UncheckedAccount<'info>,
+    /// CHECK: only its address is used, and it must be the unit's yard.
+    pub yard: UncheckedAccount<'info>,
+    /// CHECK: only its address is used; the payout on Solana checks it again.
+    #[account(seeds = [VAULT_SEED, yard.key().as_ref()], bump)]
+    pub vault: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[action]
+#[derive(Accounts)]
+pub struct SettleOnCommit<'info> {
+    #[account(seeds = [YARD_SEED, &yard.yard_id.to_le_bytes()], bump = yard.bump)]
+    pub yard: Box<Account<'info, Yard>>,
+    #[account(seeds = [UNIT_SEED, yard.key().as_ref(), &unit.unit_id.to_le_bytes()], bump = unit.bump, constraint = unit.yard == yard.key() @ LockupError::InvalidAccount)]
+    pub unit: Box<Account<'info, Unit>>,
+    #[account(mut, seeds = [BIDDER_SEED, unit.key().as_ref(), bidder_record.bidder.as_ref()], bump = bidder_record.bump, constraint = bidder_record.unit == unit.key() @ LockupError::InvalidAccount)]
+    pub bidder_record: Box<Account<'info, Bidder>>,
+    #[account(mut, constraint = bidder_token_account.owner == bidder_record.bidder @ LockupError::Unauthorized, constraint = bidder_token_account.mint == yard.bid_mint @ LockupError::MintMismatch)]
+    pub bidder_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [VAULT_SEED, yard.key().as_ref()], bump, constraint = vault.key() == yard.vault @ LockupError::InvalidAccount)]
+    pub vault: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+    /// CHECK: the program that scheduled the action. MagicBlock passes it before the escrow accounts.
+    #[account(address = crate::ID)]
+    pub source_program: UncheckedAccount<'info>,
+    /// CHECK: whoever's escrow pays for the action. The payout is the same whoever that is.
+    pub escrow_auth: UncheckedAccount<'info>,
+    /// CHECK: MagicBlock's fee escrow. Only its delegation program can sign for it, which limits
+    /// this instruction to the Magic Action path.
+    #[account(signer, address = ephemeral_rollups_sdk::pda::ephemeral_balance_pda_from_payer(&escrow_auth.key(), ACTION_ESCROW_INDEX))]
+    pub escrow: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]

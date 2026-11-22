@@ -19,7 +19,11 @@ Pins: `anchor-lang 1.0.2`, `ephemeral-rollups-sdk 0.16.2` (features `anchor`, `a
 6. **Bid.** `place_bid` + `seal_bid` create a bid only its bidder can read.
 7. **Close.** After the clock, `close_unit` reads every bid, picks the highest (ties go to the earlier
    bid) and writes bids, winner, contents and salt into the unit. `commit_unit` returns it to Solana.
-8. **Settle.** `settle_bidder` pays the winner `deposit − bid` and everyone else their full deposit.
+8. **Settle.** The commit is sent with `commit_and_settle`, which schedules one Magic Action per bidder.
+   When the unit is back on Solana, MagicBlock's validator runs `settle_on_commit` for each of them through
+   the delegation program: the winner gets `deposit − bid`, everyone else their full deposit. Fees come from
+   the operator's escrow on Solana. The actions are not atomic with the commit, so `settle_bidder` does the
+   same payout by hand if one fails; the keeper waits 25 seconds before stepping in.
    `claim_lot` moves each lot from the warehouse to the winner. The winning bid stays in the vault
    until the last lot is delivered, and only then goes to the operator's treasury. All permissionless.
 9. **Stall.** `reclaim_stalled` returns a deposit from a unit that has stalled: while the line is still

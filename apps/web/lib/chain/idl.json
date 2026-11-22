@@ -595,6 +595,79 @@
       "args": []
     },
     {
+      "name": "commit_and_settle",
+      "docs": [
+        "`commit_unit`, plus a Magic Action per bidder: as soon as the unit is back on Solana,",
+        "MagicBlock runs `settle_on_commit` for each of them, so refunds and the winner's change",
+        "arrive without anyone sending a settlement transaction. Remaining accounts are the",
+        "bidders' token accounts in line order. The actions are not atomic with the commit; if one",
+        "fails, `settle_bidder` still works."
+      ],
+      "discriminator": [
+        82,
+        154,
+        16,
+        183,
+        6,
+        4,
+        212,
+        85
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "unit",
+          "writable": true
+        },
+        {
+          "name": "yard"
+        },
+        {
+          "name": "vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        },
+        {
+          "name": "magic_context",
+          "writable": true,
+          "address": "MagicContext1111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "commit_unit",
       "docs": [
         "Commit the closed unit to Solana and release it from the rollup.",
@@ -2327,6 +2400,146 @@
         {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "settle_on_commit",
+      "docs": [
+        "The same payout as `settle_bidder`, run by MagicBlock as a Magic Action the moment the",
+        "unit is back on Solana. Scheduled by `commit_and_settle`, one per bidder. Only the action",
+        "path can call it: it requires the fee escrow that only MagicBlock's delegation program",
+        "can sign for."
+      ],
+      "discriminator": [
+        135,
+        118,
+        61,
+        83,
+        164,
+        43,
+        140,
+        4
+      ],
+      "accounts": [
+        {
+          "name": "yard",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard.yard_id",
+                "account": "Yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "unit",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bidder_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  105,
+                  100,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              },
+              {
+                "kind": "account",
+                "path": "bidder_record.bidder",
+                "account": "Bidder"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bidder_token_account",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "source_program",
+          "address": "2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR"
+        },
+        {
+          "name": "escrow_auth"
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "this instruction to the Magic Action path."
+          ],
+          "signer": true
         }
       ],
       "args": []
