@@ -25,16 +25,17 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: [{ media: "(prefers-color-scheme: dark)", color: "#0a0b0e" }, { color: "#0a0b0e" }],
+  themeColor: "#efe9dd",
   width: "device-width",
   initialScale: 1,
 };
 
-const themeScript = `try{var t=localStorage.getItem("lockup.theme");document.documentElement.dataset.theme=t==="light"?"light":"dark"}catch(e){document.documentElement.dataset.theme="dark"}`;
+// The yard opens in daylight. Dark is used only when a visitor has picked it.
+const themeScript = `try{var t=localStorage.getItem("lockup.theme");document.documentElement.dataset.theme=t==="dark"?"dark":"light"}catch(e){document.documentElement.dataset.theme="light"}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" data-theme="dark" className={`${anton.variable} ${hanken.variable} ${plex.variable}`} suppressHydrationWarning>
+    <html lang="en" data-theme="light" className={`${anton.variable} ${hanken.variable} ${plex.variable}`} suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: themeScript }} /></head>
       <body>
         <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[70] focus:rounded-lg focus:bg-accent focus:px-4 focus:py-2 focus:text-on-accent">Skip to content</a>

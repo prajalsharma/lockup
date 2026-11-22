@@ -62,7 +62,7 @@ export default function PrivyIsland({ onChange }: { onChange: (w: EmailWallet | 
       appId={PRIVY_APP_ID}
       config={{
         loginMethods: PRIVY_GOOGLE ? ["email", "google"] : ["email"],
-        appearance: { theme: "dark", accentColor: "#ffb01f", walletChainType: "solana-only" },
+        appearance: { theme: "light", accentColor: "#ffb01f", walletChainType: "solana-only" },
         embeddedWallets: { solana: { createOnLogin: "users-without-wallets" }, showWalletUIs: false },
         solana: { rpcs },
       }}

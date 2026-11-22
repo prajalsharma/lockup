@@ -42,11 +42,11 @@ export function SiteHeader() {
   const [solid, setSolid] = useState(false);
   const [menu, setMenu] = useState(false);
   const [sound, setSnd] = useState(true);
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [theme, setTheme] = useState<"dark" | "light">("light");
 
   useEffect(() => {
     setSnd(soundEnabled());
-    setTheme((document.documentElement.dataset.theme as "dark" | "light") || "dark");
+    setTheme((document.documentElement.dataset.theme as "dark" | "light") || "light");
     const f = () => setSolid(window.scrollY > 24);
     f();
     window.addEventListener("scroll", f, { passive: true });
