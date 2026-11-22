@@ -497,6 +497,35 @@
           "writable": true
         },
         {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury",
+          "docs": [
+            "Where the winning bid is paid once every lot is delivered. Must belong to the yard's operator."
+          ],
+          "writable": true
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
@@ -613,7 +642,7 @@
     {
       "name": "create_unit",
       "docs": [
-        "Open a unit. `salt_commit` is sha256 of a salt the operator keeps until close."
+        "Open a unit for people to line up. `salt_commit` is sha256 of a salt the operator keeps until close."
       ],
       "discriminator": [
         90,
@@ -935,7 +964,7 @@
     {
       "name": "draw_callback",
       "docs": [
-        "Called by the VRF program only. Stores the randomness and opens the line."
+        "Called by the VRF program only. Stores the randomness, once, and starts the bidding clock."
       ],
       "discriminator": [
         126,
@@ -995,91 +1024,6 @@
           }
         }
       ]
-    },
-    {
-      "name": "faucet",
-      "docs": [
-        "Mint test dollars to the caller. Devnet only; the mint has no value."
-      ],
-      "discriminator": [
-        0,
-        98,
-        59,
-        30,
-        144,
-        142,
-        113,
-        12
-      ],
-      "accounts": [
-        {
-          "name": "user",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "yard",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  121,
-                  97,
-                  114,
-                  100
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "yard.yard_id",
-                "account": "Yard"
-              }
-            ]
-          }
-        },
-        {
-          "name": "bid_mint",
-          "writable": true
-        },
-        {
-          "name": "user_token_account",
-          "writable": true
-        },
-        {
-          "name": "tap",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  116,
-                  97,
-                  112
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "yard"
-              },
-              {
-                "kind": "account",
-                "path": "user"
-              }
-            ]
-          }
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": []
     },
     {
       "name": "init_unit_permission",
@@ -1757,8 +1701,12 @@
     {
       "name": "reclaim_stalled",
       "docs": [
-        "Escape hatch: an hour after joining, if the unit has no result on Solana, take the",
-        "whole deposit back. Works even while the unit is still held by the rollup."
+        "Escape hatch: take the whole deposit back from a unit that has stalled.",
+        "",
+        "While the line is still open, an hour after joining: the bidder also leaves the line, so",
+        "the deposit they took back can no longer back a bid. Once the unit is locked, an hour",
+        "after its clock ran out with no result on Solana; by then bidding is over. Works while the",
+        "unit is still held by the rollup."
       ],
       "discriminator": [
         16,
@@ -1801,7 +1749,8 @@
           "name": "unit",
           "docs": [
             "bidder record by address; the record names its yard."
-          ]
+          ],
+          "writable": true
         },
         {
           "name": "bidder_record",
@@ -1866,7 +1815,8 @@
     {
       "name": "request_draw",
       "docs": [
-        "Ask MagicBlock VRF for the unit's randomness."
+        "Ask MagicBlock VRF again for a locked unit whose draw has not arrived. `start_unit` makes",
+        "the first request; this exists only so a lost request cannot strand a unit."
       ],
       "discriminator": [
         22,
@@ -1889,6 +1839,7 @@
         },
         {
           "name": "unit",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -2254,7 +2205,8 @@
       "name": "settle_bidder",
       "docs": [
         "Pay one bidder what they are owed. Anyone can run it: the numbers come from the unit.",
-        "The winner gets their deposit minus the winning bid. Everyone else gets it all back."
+        "The winner gets their deposit minus the winning bid. Everyone else gets it all back.",
+        "The winning bid itself waits in the vault for `claim_lot`."
       ],
       "discriminator": [
         240,
@@ -2373,13 +2325,6 @@
           }
         },
         {
-          "name": "treasury",
-          "docs": [
-            "Where winning bids are paid. Must belong to the yard's operator."
-          ],
-          "writable": true
-        },
-        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
@@ -2389,7 +2334,8 @@
     {
       "name": "start_unit",
       "docs": [
-        "Close the line and start the clock. Runs just before delegation."
+        "Lock the line and ask MagicBlock VRF for the unit's randomness. From here nobody can",
+        "join or leave, and only now is the draw requested."
       ],
       "discriminator": [
         105,
@@ -2404,6 +2350,7 @@
       "accounts": [
         {
           "name": "authority",
+          "writable": true,
           "signer": true,
           "relations": [
             "unit"
@@ -2435,6 +2382,42 @@
               }
             ]
           }
+        },
+        {
+          "name": "oracle_queue",
+          "writable": true
+        },
+        {
+          "name": "program_identity",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "vrf_program",
+          "address": "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz"
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": []
@@ -2590,19 +2573,6 @@
         101,
         100,
         40
-      ]
-    },
-    {
-      "name": "Tap",
-      "discriminator": [
-        127,
-        132,
-        109,
-        96,
-        218,
-        58,
-        203,
-        204
       ]
     },
     {
@@ -2797,6 +2767,16 @@
       "code": 6032,
       "name": "PriceChanged",
       "msg": "The price is higher than you agreed to"
+    },
+    {
+      "code": 6033,
+      "name": "AlreadyDrawn",
+      "msg": "This unit already has its draw"
+    },
+    {
+      "code": 6034,
+      "name": "NotDrawn",
+      "msg": "This unit's draw has not arrived yet"
     }
   ],
   "types": [
@@ -3079,25 +3059,6 @@
               "Zero until the unit is closed."
             ],
             "type": "u64"
-          }
-        ]
-      }
-    },
-    {
-      "name": "Tap",
-      "docs": [
-        "Faucet cooldown per wallet."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "last",
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
           }
         ]
       }

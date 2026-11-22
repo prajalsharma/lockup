@@ -34,7 +34,7 @@ async function main() {
   const buyerUsd = await getOrCreateAssociatedTokenAccount(connection, buyer, bidMint, buyer.publicKey);
   await mintTo(connection, minter, itemMint, sellerItem.address, minter, 3);
   const keeperUsd = getAssociatedTokenAddressSync(bidMint, keeper.publicKey);
-  await transfer(connection, keeper, keeperUsd, buyerUsd.address, keeper, 70_000); // $0.07
+  await transfer(connection, keeper, keeperUsd, buyerUsd.address, keeper, 90_000); // $0.09
 
   const [listing] = PublicKey.findProgramAddressSync([enc("listing"), p.yard.toBuffer(), seller.publicKey.toBuffer(), itemMint.toBuffer()], programId);
   const [stall] = PublicKey.findProgramAddressSync([enc("stall"), listing.toBuffer()], programId);
@@ -68,8 +68,21 @@ async function main() {
   const s4 = await bp.methods.buyItem(new BN(1), PRICE).accountsPartial(buyAccounts).rpc();
   check("sold out: listing and stall closed", !(await connection.getAccountInfo(listing)) && !(await connection.getAccountInfo(stall)), tx(s4));
 
+  console.log("\n▸ a stranger drops a stray token into someone's stall");
+  await mintTo(connection, minter, itemMint, sellerItem.address, minter, 2);
+  const list = () => sp.methods.listItem(PRICE, new BN(1)).accountsPartial({ seller: seller.publicKey, yard: p.yard, itemMint, sellerItemAccount: sellerItem.address, listing, stall, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc();
+  await list();
+  await mintTo(connection, minter, itemMint, stall, minter, 1);
+  await sp.methods.cancelListing().accountsPartial({ seller: seller.publicKey, yard: p.yard, listing, stall, sellerItemAccount: sellerItem.address, tokenProgram: TOKEN_PROGRAM_ID }).rpc();
+  check("the seller can still cancel, and keeps the stray token", Number((await getAccount(connection, sellerItem.address)).amount) === 3 && !(await connection.getAccountInfo(stall)));
+  await list();
+  await mintTo(connection, minter, itemMint, stall, minter, 1);
+  const had = Number((await getAccount(connection, buyerItem.address)).amount);
+  await bp.methods.buyItem(new BN(1), PRICE).accountsPartial(buyAccounts).rpc();
+  check("the last item can still be bought, and the stall closes", Number((await getAccount(connection, buyerItem.address)).amount) === had + 2 && !(await connection.getAccountInfo(stall)) && !(await connection.getAccountInfo(listing)));
+
   // Send the test dollars back to the keeper.
-  await transfer(connection, seller, sellerUsd.address, keeperUsd, seller, 60_000);
+  await transfer(connection, seller, sellerUsd.address, keeperUsd, seller, 80_000);
   await transfer(connection, buyer, buyerUsd.address, keeperUsd, buyer, 10_000);
   console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
   if (results.some((r) => !r)) process.exit(1);

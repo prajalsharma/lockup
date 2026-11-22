@@ -34,7 +34,7 @@ rollup), and every unit's page shows the same map pinned to where that unit is r
 
 | Feature | Where |
 |---|---|
-| VRF | `request_draw` / `draw_callback`: the randomness every unit is stocked from |
+| VRF | `start_unit` / `draw_callback`: the randomness every unit is stocked from, requested only once the line has locked |
 | Private Ephemeral Rollup | sealed bids and the hidden manifest, with per-account read permissions |
 | Delegation + commit | the unit moves to the rollup for bidding and back to Solana to settle |
 
@@ -75,6 +75,7 @@ pnpm dev                 # site on http://localhost:3000
 pnpm test:program        # game-rule tests
 pnpm round               # one full round on devnet, every step asserted
 pnpm market              # list, buy and cancel on devnet, with the refusals checked
+pnpm attack              # join a live unit and try to cheat it; every attempt must be refused
 ```
 
 Rounds on the hosted site are moved along by a keeper (`apps/web/lib/chain/keeper.ts`) that runs

@@ -19,7 +19,7 @@ export function LiveCorridor() {
         const open = u.status === "closed";
         const left = u.closesAt - now;
         const line =
-          u.status === "created" ? "Drawing contents" :
+          u.status === "created" ? "Setting up" :
           u.status === "open" ? (u.mode === "multi" ? `${u.bids.filter((x) => !x.house).length} of 2 players in` : `${u.bids.length} in line · from ${usd(u.minBid)}`) :
           u.status === "bidding" ? (u.stocked && left > 0 ? "Sealed bidding" : "Locked") :
           u.winner ? `Sold · held ${usd(u.value)}` : "Closed, no bids";

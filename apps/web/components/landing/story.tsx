@@ -4,7 +4,7 @@ import { clueText, useChainYard } from "@/components/chain-rounds";
 import { pad2, short, usd } from "@/lib/format";
 
 const STEPS = [
-  { title: "The unit is stocked", body: "A random draw decides what goes inside. Nobody picks the contents, including us. The draw comes from MagicBlock VRF, mixed with a salt we lock in beforehand and publish afterwards." },
+  { title: "The unit is stocked", body: "A random draw decides what goes inside. Nobody picks the contents, including us. The draw comes from MagicBlock VRF and is made only after the line has locked, mixed with a salt we lock in beforehand and publish afterwards." },
   { title: "Three clues go on the door", body: "The same draw picks three true facts about the unit and pins them up. How many items. What kind. A floor on what it's worth. The rest stays hidden." },
   { title: "You bid in the dark", body: "Your bid is written inside a private rollup. Other bidders can see that you bid. They can't see the number, so nobody can beat you by a dollar at the last second." },
   { title: "The clock runs out", body: "All the bids are read at the same moment. The highest one takes the unit. Everyone else gets their full bid back." },

@@ -11,17 +11,17 @@ import type { ChainUnit } from "@/lib/chain/types";
  */
 export const FLOW = [
   { where: "Solana", title: "A unit is created", body: "It starts as an account on Solana. Before anything is drawn, we lock in a secret number we can't change later.", you: null },
-  { where: "MagicBlock VRF → Solana", title: "MagicBlock VRF rolls the dice", body: "MagicBlock VRF sends 32 random bytes to the unit on Solana. Nobody picked them, and anyone can check where they came from.", you: null },
-  { where: "Solana", title: "You line up", body: "You put down a deposit in USDC. It sits in a vault on Solana where everyone can see it, and it is the most you can bid.", you: "Press Get in line." },
-  { where: "Solana → private rollup", title: "The door locks", body: "Solana hands the unit to MagicBlock's private rollup. From here on, what gets written about it can't be read from outside.", you: null },
+  { where: "Solana", title: "You line up", body: "You put down a deposit in USDC. It sits in a vault on Solana where everyone can see it, and it is the most you can bid. Nothing has been drawn yet, so nobody knows what the unit will hold.", you: "Press Get in line." },
+  { where: "MagicBlock VRF → Solana", title: "The line locks and VRF rolls the dice", body: "Once nobody else can join, MagicBlock VRF sends 32 random bytes to the unit on Solana. Nobody picked them, and anyone can check where they came from.", you: null },
+  { where: "Solana → private rollup", title: "The unit goes behind the door", body: "Solana hands the unit to MagicBlock's private rollup. From here on, what gets written about it can't be read from outside.", you: null },
   { where: "Private rollup", title: "The unit is filled", body: "Inside the rollup, the random bytes and our secret number decide what the unit holds. Three true clues go up on the door.", you: "Read the clues." },
   { where: "Private rollup", title: "You seal a bid", body: "Your bid is written inside the rollup in about half a second. Others can see that you bid. Only you can see how much.", you: "Pick a number and press Seal my bid." },
   { where: "Private rollup → Solana", title: "The clock runs out", body: "Every bid is opened at the same moment and the highest one wins. The rollup sends the result back to Solana.", you: null },
-  { where: "Solana", title: "Everyone is paid", body: "On Solana, the winner gets the items and their change, and everyone else gets their whole deposit back. Keep the items or sell them.", you: "Keep what you found or sell it." },
+  { where: "Solana", title: "Everyone is paid", body: "On Solana, the winner gets the items and their change, and everyone else gets their whole deposit back. We are paid the winning bid only after every item is delivered. Keep the items or sell them.", you: "Keep what you found or sell it." },
 ] as const;
 
-const WIDE = { W: 1000, H: 430, sol: 330, roll: 168, xs: [90, 230, 370, 510, 603, 696, 790, 925], box: [440, 44, 432, 196], vrf: [230, 92], vw: 172, f: 13, cw: 46, name: "MAGICBLOCK PRIVATE ROLLUP", note: "sealed from outside", sub: "the base chain · public · holds the money and the final result" };
-const NARROW = { W: 420, H: 440, sol: 336, roll: 170, xs: [30, 88, 146, 210, 254, 298, 342, 396], box: [182, 44, 206, 198], vrf: [88, 92], vw: 150, f: 15, cw: 42, name: "PRIVATE ROLLUP", note: "", sub: "public · holds the money" };
+const WIDE = { W: 1000, H: 430, sol: 330, roll: 168, xs: [90, 230, 370, 510, 603, 696, 790, 925], box: [440, 44, 432, 196], vrf: [340, 92], vw: 172, f: 13, cw: 46, name: "MAGICBLOCK PRIVATE ROLLUP", note: "sealed from outside", sub: "the base chain · public · holds the money and the final result" };
+const NARROW = { W: 420, H: 440, sol: 336, roll: 170, xs: [30, 88, 146, 210, 254, 298, 342, 396], box: [182, 44, 206, 198], vrf: [96, 92], vw: 150, f: 15, cw: 42, name: "PRIVATE ROLLUP", note: "", sub: "public · holds the money" };
 
 const HEX = "0123456789abcdef";
 const noise = () => Array.from({ length: 4 }, () => HEX[Math.floor(Math.random() * 16)] + HEX[Math.floor(Math.random() * 16)]).join(" ");
@@ -39,7 +39,7 @@ export function ChainFlow({ step, draw, unit }: { step: number; draw?: string | 
   // While the draw is happening the bytes spin; once it has landed they hold still.
   const real = draw ? draw.match(/../g)!.slice(0, 4).join(" ") : null;
   useEffect(() => {
-    if (step !== 1) { setBytes(step > 1 ? real ?? "a3 9f 1c 07" : "•• •• •• ••"); return; }
+    if (step !== 2) { setBytes(step > 2 ? real ?? "a3 9f 1c 07" : "•• •• •• ••"); return; }
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { setBytes(real ?? "a3 9f 1c 07"); return; }
     const t = setInterval(() => setBytes(noise()), 90);
     const stop = setTimeout(() => { clearInterval(t); setBytes(real ?? noise()); }, 1500);
@@ -83,10 +83,10 @@ export function ChainFlow({ step, draw, unit }: { step: number; draw?: string | 
       <text x={narrow ? 98 : 84} y={L.sol + 62} fontSize={L.f - 2} fill="var(--ink-3)">{L.sub}</text>
 
       {/* MagicBlock VRF */}
-      <line x1={vx} y1={vy + 26} x2={vx} y2={L.sol - 56} stroke={step === 1 ? "var(--accent-text)" : "var(--line-2)"} strokeWidth="1.5" strokeDasharray="3 7" className={step === 1 ? "flow-fall" : ""} />
-      <rect x={vx - L.vw / 2} y={vy - 30} width={L.vw} height="56" rx="8" className={T} fill="var(--ground)" stroke={step === 1 ? "var(--accent-text)" : "var(--line-2)"} strokeWidth="1.5" />
-      <text x={vx} y={vy - 8} fontSize={L.f - 1} letterSpacing="0.08em" textAnchor="middle" fill={step === 1 ? "var(--accent-text)" : "var(--ink-2)"}>MAGICBLOCK VRF</text>
-      <text x={vx} y={vy + 14} fontSize={L.f + 1} textAnchor="middle" fill={step >= 1 ? "var(--ink)" : "var(--ink-3)"}>{bytes}</text>
+      <line x1={L.xs[2]} y1={vy + 26} x2={L.xs[2]} y2={L.sol - 56} stroke={step === 2 ? "var(--accent-text)" : "var(--line-2)"} strokeWidth="1.5" strokeDasharray="3 7" className={step === 2 ? "flow-fall" : ""} />
+      <rect x={vx - L.vw / 2} y={vy - 30} width={L.vw} height="56" rx="8" className={T} fill="var(--ground)" stroke={step === 2 ? "var(--accent-text)" : "var(--line-2)"} strokeWidth="1.5" />
+      <text x={vx} y={vy - 8} fontSize={L.f - 1} letterSpacing="0.08em" textAnchor="middle" fill={step === 2 ? "var(--accent-text)" : "var(--ink-2)"}>MAGICBLOCK VRF</text>
+      <text x={vx} y={vy + 14} fontSize={L.f + 1} textAnchor="middle" fill={step >= 2 ? "var(--ink)" : "var(--ink-3)"}>{bytes}</text>
 
       {/* The route, and how far along it the unit is */}
       <path d={route} fill="none" stroke="var(--line-2)" strokeWidth="1.5" />
@@ -101,7 +101,7 @@ export function ChainFlow({ step, draw, unit }: { step: number; draw?: string | 
       {/* What rides along with the unit at each stop */}
       <g className="flow-move" style={{ transform: `translate(${pos.x}px, ${pos.y}px)` }}>
         {/* deposits waiting in the vault */}
-        <g className={T} opacity={step === 2 ? 1 : 0}>
+        <g className={T} opacity={step === 1 ? 1 : 0}>
           {[0, 1, 2].map((i) => <circle key={i} cx={30 + i * 13} cy={-12} r="5.5" fill="var(--accent)" stroke="var(--ground)" strokeWidth="1.5" />)}
           <text x="30" y="-26" fontSize={L.f - 2} fill="var(--ink-2)">deposits</text>
         </g>
@@ -202,16 +202,16 @@ export function ChainFlowLanding() {
   return (
     <>
       <ChainFlowSection draw={latest?.draw} unit={latest?.id} />
-      {latest && <p className="label num mt-8 text-ink-3">The bytes in the VRF box are the first four of unit {String(latest.id).padStart(2, "0")}'s real draw on devnet</p>}
+      {latest && <p className="label num mt-8 text-ink-3">The bytes in the VRF box are the first four of unit {String(latest.id).padStart(2, "0")}'s draw on devnet</p>}
     </>
   );
 }
 
 /** Which stop a real unit is at, from what the chain says about it. */
 export function flowStep(u: ChainUnit, iBid: boolean): number {
-  if (u.status === "created") return u.draw ? 1 : 0;
-  if (u.status === "open") return 2;
-  if (u.status === "bidding") return !u.stocked ? 3 : iBid || u.bidCount === u.bids.length ? 5 : 4;
+  if (u.status === "created") return 0;
+  if (u.status === "open") return u.bids.some((b) => !b.house) ? 1 : 0;
+  if (u.status === "bidding") return !u.onRollup ? 2 : !u.stocked ? 3 : iBid || u.bidCount === u.bids.length ? 5 : 4;
   return u.claimed || !u.winner ? 7 : 6;
 }
 

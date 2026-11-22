@@ -103,9 +103,9 @@ export function LiveStage({ unitId }: { unitId: number }) {
 
   let phaseLabel = "Line is open";
   let big = "—";
-  if (unit.status === "created") phaseLabel = "Waiting for the draw";
+  if (unit.status === "created") phaseLabel = "Setting up";
   if (unit.status === "bidding") {
-    phaseLabel = !unit.stocked ? "Locking the door" : left > 0 ? "Door opens in" : "Opening bids";
+    phaseLabel = !unit.stocked ? (unit.onRollup ? "Filling the unit" : "Rolling the dice") : left > 0 ? "Door opens in" : "Opening bids";
     big = unit.stocked ? clock(left) : "—";
   }
   if (closed) phaseLabel = "Opened";
@@ -144,7 +144,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
             </p>
           )}
 
-          {unit.status === "created" && <Step title="Drawing the contents">MagicBlock VRF is picking this unit's random number. It takes a few seconds.</Step>}
+          {unit.status === "created" && <Step title="Getting ready">This unit is being set up. It takes a few seconds.</Step>}
 
           {unit.status === "open" && me && !mine && (
             <form noValidate onSubmit={(e) => { e.preventDefault(); void p.join(unit.id, Math.min(depositCap, deposit)).then((ok) => ok && sfx.lock()); }}>
@@ -163,7 +163,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
           )}
 
           {unit.status === "open" && mine && !multi && (
-            <Step title="You're in line">The door locks about 15 seconds after the first player joins. Then the clues go up and bidding starts.</Step>
+            <Step title="You're in line">The door locks about 15 seconds after the first player joins. Only then is the unit's random draw made. Then the clues go up and bidding starts.</Step>
           )}
           {unit.status === "open" && mine && multi && (
             <Step title={players < 2 ? "Waiting for another player" : "You're in line"}>
@@ -174,7 +174,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
             </Step>
           )}
 
-          {unit.status === "bidding" && !unit.stocked && <Step title="Locking the door">The unit is moving to the private rollup and being stocked. Clues are next.</Step>}
+          {unit.status === "bidding" && !unit.stocked && <Step title={unit.onRollup ? "Filling the unit" : "Rolling the dice"}>{unit.onRollup ? "The unit is inside the private rollup and its contents are being worked out. Clues are next." : "The line is locked. MagicBlock VRF is drawing this unit's random number now, after everyone has committed, then the unit moves to the private rollup."}</Step>}
 
           {unit.status === "bidding" && unit.stocked && (
             <div>

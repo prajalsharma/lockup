@@ -5,19 +5,26 @@ Pins: `anchor-lang 1.0.2`, `ephemeral-rollups-sdk 0.16.2` (features `anchor`, `a
 
 ## A round
 
-1. **Create.** The operator opens a unit and commits to `sha256(salt)`.
-2. **Draw.** MagicBlock VRF writes 32 random bytes into the unit (`request_draw` → `draw_callback`).
-3. **Line up.** Wallets escrow a deposit on Solana (`join_unit`). The deposit is public and caps the bid.
-4. **Lock.** `start_unit` starts the clock; `delegate_unit` hands the unit to the private rollup's validator.
+1. **Create.** The operator opens a unit and commits to `sha256(salt)`. The line is open at once.
+   No randomness exists yet.
+2. **Line up.** Wallets escrow a deposit on Solana (`join_unit`). The deposit is public and caps the bid.
+3. **Lock and draw.** `start_unit` locks the line and, in the same instruction, asks MagicBlock VRF
+   for the unit's randomness. `draw_callback` stores it, once, and starts the bidding clock. Because the
+   draw is requested only after the lock, nobody can know a unit's contents while people are still
+   deciding whether to join. `request_draw` exists only to retry a lost request.
+4. **Delegate.** `delegate_unit` hands the unit to MagicBlock's private (TEE) validator, and only to it.
+   It refuses a unit that has no draw.
 5. **Stock.** Inside the rollup, `stock_unit(salt)` derives the contents from
    `sha256(randomness, salt, unit)`, writes them to a private manifest and posts three clues.
 6. **Bid.** `place_bid` + `seal_bid` create a bid only its bidder can read.
 7. **Close.** After the clock, `close_unit` reads every bid, picks the highest (ties go to the earlier
    bid) and writes bids, winner, contents and salt into the unit. `commit_unit` returns it to Solana.
-8. **Settle.** `settle_bidder` pays the winner `deposit − bid`, sends the winning bid to the operator's
-   treasury, and pays everyone else their full deposit.
-   `claim_lot` moves each lot from the warehouse to the winner. Both are permissionless.
-9. **Stall.** `reclaim_stalled` returns a deposit an hour after joining if the unit has no result on Solana.
+8. **Settle.** `settle_bidder` pays the winner `deposit − bid` and everyone else their full deposit.
+   `claim_lot` moves each lot from the warehouse to the winner. The winning bid stays in the vault
+   until the last lot is delivered, and only then goes to the operator's treasury. All permissionless.
+9. **Stall.** `reclaim_stalled` returns a deposit from a unit that has stalled: while the line is still
+   open, an hour after joining (the bidder also leaves the line); once locked, an hour after the clock
+   ran out with no result on Solana.
 
 ## Resale
 
@@ -48,8 +55,9 @@ keeper, paid from the operator's treasury; the chain does not guarantee it.
 
 ## What is trusted
 
-- The operator knows the salt, so it can compute a unit's contents early. It cannot choose them: the
-  commitment is made before the VRF draw. The salt is published at close for anyone to recheck.
+- The operator knows the salt, so once a unit's draw has landed it can compute the contents before the
+  door opens. It cannot choose them, and it cannot know them while the line is open, because the draw is
+  requested only when the line locks. The salt is published at close for anyone to recheck.
 - Sealed bids rely on the private rollup (Intel TDX) refusing reads from non-members. `pnpm round`
   checks that another bidder and the operator both fail to read a bid.
 - House bidders are run by the keeper and are meant to bid from the public clues only. That is a rule
@@ -64,6 +72,28 @@ whole transaction, so the cap holds even when many requests arrive at once on di
 Starter SOL is capped by counting a marker address's recent transactions (20 an hour, 80 a day).
 Checked on the live site: 86 fresh wallets asked in bursts of 40 and exactly the remaining 5 slots of
 that hour were paid (the caps were 8 and 24 at the time).
+
+## Security review
+
+The program was reviewed with an AI security agent before submission. What changed as a result:
+
+- A bidder who took a stalled deposit back stayed in line and could still bid with money they no longer
+  had at stake. Reclaiming now removes them from the line, or is only possible after bidding is over.
+- The operator was paid the winning bid before the items were delivered. It is now paid in the same
+  instruction that delivers the last lot.
+- The random draw was requested when a unit was created, so the operator could see contents before anyone
+  joined and abandon units it did not like. The draw is now requested when the line locks.
+- A stray token sent to a listing's stall could stop the seller cancelling or the last item selling.
+- `delegate_unit` accepted any validator; it is pinned to MagicBlock's private validator.
+- The unused test faucet instruction was removed.
+
+The review also asked whether bid amounts and the salt, which travel as instruction data, can be read
+back from the rollup's transaction history. `pnpm round` now checks this: another bidder, the operator
+and a caller with no login each get an empty record for someone else's transaction.
+
+Left as they are, and worth knowing: the operator can change who may read a unit's public state on the
+rollup; bidder records and units are never closed, so their rent stays locked; rollup accounts are not
+closed before a unit returns, so the rent the unit sponsors for them is not recovered.
 
 ## Checked on devnet
 

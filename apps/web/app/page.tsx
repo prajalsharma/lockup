@@ -15,7 +15,7 @@ const CHECKS = [
 
 const TODAY = [
   "Solo units have two house bidders so there is always someone to beat. They are run by us and bid from the three public clues only. That rule is in our code, not enforced by the chain. Multiplayer units have none, unless one player waits alone for two minutes.",
-  "Each unit's operator knows a secret salt, so the operator can work out the contents early. The operator can't choose them: the random draw arrives after the salt is locked in, and the salt is published when the unit closes.",
+  "The random draw is made only after a unit's line has locked, so nobody knows the contents while people are still deciding to join. After that we could work them out before the door opens, because we hold a secret salt; we can't choose them. The salt is published when the unit closes so anyone can recheck.",
   "Rounds move only while someone has the site open. The keeper that locks, opens and settles units is driven by visits to the yard.",
   "Appraisals are our numbers, not market prices. The yard's own buyer pays half the appraisal and is run by us, and the warehouse was stocked by us with far more of each item than will ever be drawn.",
   "Stakes are small on purpose. The yard runs on about 20 devnet USDC, and new wallets are sent 1 USDC to start, up to 10 wallets an hour and 40 a day. More comes from Circle's faucet.",

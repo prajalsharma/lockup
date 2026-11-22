@@ -71,17 +71,19 @@ async function main() {
   await join(gp, g.publicKey, gAta, USD);
   check("honest join with $1.00", true);
   await refused("join the same unit twice", () => join(gp, g.publicKey, gAta, USD));
-  await refused("a player starts the clock themself", () => gp.methods.startUnit().accountsPartial({ authority: g.publicKey, unit }).rpc(), /Unauthorized|has_one|Constraint/);
+  await refused("a player asks for the draw early to peek", () => gp.methods.requestDraw().accountsPartial({ authority: g.publicKey, unit, oracleQueue: new PublicKey("Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh") }).rpc(), /Unauthorized|has_one|Constraint/);
+  await refused("a player starts the clock themself", () => gp.methods.startUnit().accountsPartial({ authority: g.publicKey, unit, oracleQueue: new PublicKey("Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh") }).rpc(), /Unauthorized|has_one|Constraint/);
   await refused("take the deposit back early (reclaim)", () => gp.methods.reclaimStalled().accountsPartial({ bidder: g.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, g.publicKey), bidderTokenAccount: gAta, vault: p.vault, tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /TooEarly/);
-  await refused("settle before the unit closes", () => gp.methods.settleBidder().accountsPartial({ crank: g.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, g.publicKey), bidderTokenAccount: gAta, vault: p.vault, treasury: getAssociatedTokenAddressSync(usdc, yard.authority), tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /WrongStatus/);
+  await refused("settle before the unit closes", () => gp.methods.settleBidder().accountsPartial({ crank: g.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, g.publicKey), bidderTokenAccount: gAta, vault: p.vault, tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /WrongStatus/);
   // an old unit someone else won: try to take its contents and re-run its payouts
   const oldUnit = p.unit(BigInt(old.id)), oldWinner = new PublicKey(old.winner);
   const oldU = await (gp.account as any).unit.fetch(oldUnit);
   const mint = yard.catalog[oldU.lots[0].item].mint as PublicKey;
   const gItem = await getOrCreateAssociatedTokenAccount(connection, g, mint, g.publicKey);
-  await refused("claim another winner's items into my wallet", () => gp.methods.claimLot(0).accountsPartial({ crank: g.publicKey, yard: p.yard, unit: oldUnit, bidderRecord: p.bidder(oldUnit, oldWinner), itemMint: mint, warehouse: p.warehouse(mint), winnerTokenAccount: gItem.address, tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /NotWinner|AlreadyClaimed/);
-  await refused("pay out an already settled bidder again", () => gp.methods.settleBidder().accountsPartial({ crank: g.publicKey, yard: p.yard, unit: oldUnit, bidderRecord: p.bidder(oldUnit, oldWinner), bidderTokenAccount: getAssociatedTokenAddressSync(usdc, oldWinner), vault: p.vault, treasury: getAssociatedTokenAddressSync(usdc, yard.authority), tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /AlreadySettled/);
-  await refused("redirect someone's refund to my wallet", () => gp.methods.settleBidder().accountsPartial({ crank: g.publicKey, yard: p.yard, unit: oldUnit, bidderRecord: p.bidder(oldUnit, oldWinner), bidderTokenAccount: gAta, vault: p.vault, treasury: getAssociatedTokenAddressSync(usdc, yard.authority), tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /Unauthorized|AlreadySettled/);
+  await refused("claim another winner's items into my wallet", () => gp.methods.claimLot(0).accountsPartial({ crank: g.publicKey, yard: p.yard, unit: oldUnit, bidderRecord: p.bidder(oldUnit, oldWinner), itemMint: mint, warehouse: p.warehouse(mint), winnerTokenAccount: gItem.address, vault: p.vault, treasury: getAssociatedTokenAddressSync(usdc, yard.authority), tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /NotWinner|AlreadyClaimed/);
+  await refused("pay out an already settled bidder again", () => gp.methods.settleBidder().accountsPartial({ crank: g.publicKey, yard: p.yard, unit: oldUnit, bidderRecord: p.bidder(oldUnit, oldWinner), bidderTokenAccount: getAssociatedTokenAddressSync(usdc, oldWinner), vault: p.vault, tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /AlreadySettled/);
+  await refused("send a finished unit's winning bid to my wallet instead of the operator", () => gp.methods.claimLot(0).accountsPartial({ crank: g.publicKey, yard: p.yard, unit: oldUnit, bidderRecord: p.bidder(oldUnit, oldWinner), itemMint: mint, warehouse: p.warehouse(mint), winnerTokenAccount: getAssociatedTokenAddressSync(mint, oldWinner), vault: p.vault, treasury: gAta, tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /Unauthorized|AlreadyClaimed/);
+  await refused("redirect someone's refund to my wallet", () => gp.methods.settleBidder().accountsPartial({ crank: g.publicKey, yard: p.yard, unit: oldUnit, bidderRecord: p.bidder(oldUnit, oldWinner), bidderTokenAccount: gAta, vault: p.vault, tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /Unauthorized|AlreadySettled/);
 
   console.log("\n▸ waiting for the door to lock and the unit to be stocked");
   let u: any;
@@ -120,11 +122,11 @@ async function main() {
   await sleep(6000);
   const bal = Number((await connection.getTokenAccountBalance(gAta)).value.amount) / 1e6;
   check(`round finished: winner ${u.winner === g.publicKey.toBase58() ? "me" : "someone else"}, my USDC is ${bal}`, u.winner === g.publicKey.toBase58() ? Math.abs(bal - 0.05) < 1e-9 : Math.abs(bal - 1) < 1e-9);
-  await refused("get paid out a second time", () => gp.methods.settleBidder().accountsPartial({ crank: g.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, g.publicKey), bidderTokenAccount: gAta, vault: p.vault, treasury: getAssociatedTokenAddressSync(usdc, yard.authority), tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /AlreadySettled/);
+  await refused("get paid out a second time", () => gp.methods.settleBidder().accountsPartial({ crank: g.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, g.publicKey), bidderTokenAccount: gAta, vault: p.vault, tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /AlreadySettled/);
   await refused("take the deposit back as well (reclaim after closing)", () => gp.methods.reclaimStalled().accountsPartial({ bidder: g.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, g.publicKey), bidderTokenAccount: gAta, vault: p.vault, tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /AlreadySettled|TooEarly|WrongStatus/);
   const m0 = yard.catalog[(await (gp.account as any).unit.fetch(unit)).lots[0].item].mint as PublicKey;
   const myItem = await getOrCreateAssociatedTokenAccount(connection, g, m0, new PublicKey(u.winner), true);
-  await refused("claim the same lot twice", () => gp.methods.claimLot(0).accountsPartial({ crank: g.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, new PublicKey(u.winner)), itemMint: m0, warehouse: p.warehouse(m0), winnerTokenAccount: myItem.address, tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /AlreadyClaimed/);
+  await refused("claim the same lot twice", () => gp.methods.claimLot(0).accountsPartial({ crank: g.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, new PublicKey(u.winner)), itemMint: m0, warehouse: p.warehouse(m0), winnerTokenAccount: myItem.address, vault: p.vault, treasury: getAssociatedTokenAddressSync(usdc, yard.authority), tokenProgram: TOKEN_PROGRAM_ID }).rpc(), /AlreadyClaimed/);
 
   console.log(`\n${results.filter(Boolean).length} of ${results.length} checks passed`);
   process.exit(results.every(Boolean) ? 0 : 1);

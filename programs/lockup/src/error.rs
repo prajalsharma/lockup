@@ -68,4 +68,8 @@ pub enum LockupError {
     NotEnoughListed,
     #[msg("The price is higher than you agreed to")]
     PriceChanged,
+    #[msg("This unit already has its draw")]
+    AlreadyDrawn,
+    #[msg("This unit's draw has not arrived yet")]
+    NotDrawn,
 }

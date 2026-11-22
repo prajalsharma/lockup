@@ -31,8 +31,8 @@ export async function GET() {
         clues: u.stocked ? u.clues.map((c: any) => ({ kind: c.kind, arg: c.arg })) : [],
         winner, winningBid: Number(u.winningBid) / 1e6, value: u.value / 100,
         lots: closed ? u.lots.map((l: any) => ({ name: ITEMS[l.item].name, id: ITEMS[l.item].id, rarity: ITEMS[l.item].rarity, heavy: ITEMS[l.item].heavy, qty: l.qty, value: (ITEMS[l.item].value * l.qty) / 100 })) : [],
-        claimed: closed && u.lots.length > 0 && u.claimedMask === (1 << u.lots.length) - 1,
-        draw: status === "created" ? "" : Buffer.from(u.randomness.slice(0, 8)).toString("hex"),
+        claimed: closed && u.lots.length > 0 && (u.claimedMask & ((1 << u.lots.length) - 1)) === (1 << u.lots.length) - 1,
+        draw: u.randomness.every((b: number) => b === 0) ? "" : Buffer.from(u.randomness.slice(0, 8)).toString("hex"),
       };
     });
     const body: ChainYard = { programId: PROGRAM.toBase58(), yard: YARD.toBase58(), unitCount: Number(yard.unitCount), settled: all.filter((x) => "closed" in x.u.status).length, keeper: !!k, units: out, readAt: Date.now() };

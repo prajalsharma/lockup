@@ -29,6 +29,9 @@ const TARGET_MULTI = 1; // multiplayer units kept waiting: players only
 export const WINDOW = 60;
 /** Units that are completely finished: settled and claimed. Nothing more can happen to them, so they are skipped. */
 const finished = new Set<number>();
+/** When each unit's draw was last re-requested, and which listings the house buyer recently failed on. */
+const redraw = new Map<number, number>();
+const skipListing = new Map<string, number>();
 const LINE_SECONDS = 15; // wait after the first player joins before the door locks
 // Stakes are in Circle devnet USDC and deliberately small: the whole yard runs on a float of about 20 USDC.
 const MIN_BID = 0.1 * USD;
@@ -210,16 +213,25 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
           ? first > 0 && now - first >= LINE_SECONDS
           : humans.length >= 2 ? now - last >= MULTI_LINE_SECONDS : humans.length === 1 && houseIn > 0;
         if (humans.length && (full || ready)) {
-          await step(`start + delegate unit ${id}`, async () => {
-            const del = await p.methods.delegateUnit(new BN(id)).accountsPartial({ authority: k.keeper.publicKey, yard: YARD, unit: key, validator: TEE_VALIDATOR }).instruction();
-            await p.methods.startUnit().accountsPartial({ authority: k.keeper.publicKey, unit: key }).postInstructions([del]).rpc();
+          await step(`lock unit ${id} + request draw`, async () => {
+            // Locking the line is also what asks MagicBlock VRF for the draw. The unit is handed to
+            // the rollup on a later tick, once the draw has landed.
+            await p.methods.startUnit().accountsPartial({ authority: k.keeper.publicKey, unit: key, oracleQueue: VRF_QUEUE }).rpc();
           });
         }
         continue;
       }
 
       if (st === "bidding" && !onRollup) {
-        // Started but the delegation did not land. Finish it.
+        // Locked and waiting for its draw. Ask again only if the draw has clearly gone missing.
+        if (u.randomness.every((b: number) => b === 0)) {
+          const lockedFor = now - (Number(u.closesAt) - Number(u.duration));
+          if (lockedFor > 25 && Date.now() - (redraw.get(id) ?? 0) > 25_000) {
+            redraw.set(id, Date.now());
+            await step(`ask again for unit ${id}'s draw`, () => p.methods.requestDraw().accountsPartial({ authority: k.keeper.publicKey, unit: key, oracleQueue: VRF_QUEUE }).rpc());
+          }
+          continue;
+        }
         await step(`delegate unit ${id}`, () => p.methods.delegateUnit(new BN(id)).accountsPartial({ authority: k.keeper.publicKey, yard: YARD, unit: key, validator: TEE_VALIDATOR }).rpc());
         continue;
       }
@@ -266,24 +278,28 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
 
       if (st === "closed") {
         const hasWinner = !u.winner.equals(PublicKey.default);
-        const allClaimed = !hasWinner || u.claimedMask === (1 << u.lots.length) - 1;
+        const all = (1 << u.lots.length) - 1;
+        const allClaimed = !hasWinner || (u.claimedMask & all) === all;
         const records = await (p.account as any).bidder.fetchMultiple(u.slots.map((s: any) => bidderPda(key, s.bidder)));
         const unsettled = u.slots.filter((_: any, i: number) => records[i] && !records[i].settled);
-        if (!unsettled.length && allClaimed) { finished.add(id); continue; }
+        const winnerRecord = hasWinner ? records[u.slots.findIndex((s: any) => s.bidder.equals(u.winner))] : null;
+        // A winner who took a stalled deposit back never paid, so there is nothing to deliver.
+        const voided = !!winnerRecord && winnerRecord.settled && !winnerRecord.won;
+        if (!unsettled.length && (allClaimed || voided)) { finished.add(id); continue; }
         for (const s of unsettled) {
           await step(`settle ${s.bidder.toBase58().slice(0, 4)} on unit ${id}`, () => p.methods.settleBidder()
-            .accountsPartial({ crank: k.keeper.publicKey, yard: YARD, unit: key, bidderRecord: bidderPda(key, s.bidder), bidderTokenAccount: getAssociatedTokenAddressSync(BID_MINT, s.bidder), vault: VAULT, treasury, tokenProgram: TOKEN_PROGRAM_ID }).rpc());
+            .accountsPartial({ crank: k.keeper.publicKey, yard: YARD, unit: key, bidderRecord: bidderPda(key, s.bidder), bidderTokenAccount: getAssociatedTokenAddressSync(BID_MINT, s.bidder), vault: VAULT, tokenProgram: TOKEN_PROGRAM_ID }).rpc());
         }
-        if (hasWinner && !allClaimed) {
-          const winnerIndex = u.slots.findIndex((s: any) => s.bidder.equals(u.winner));
-          const paid = records[winnerIndex]?.won || !unsettled.some((s: any) => s.bidder.equals(u.winner)) || report.did.some((d) => d.startsWith(`settle ${u.winner.toBase58().slice(0, 4)}`));
+        if (hasWinner && !allClaimed && !voided) {
+          // Items go out only once the winner's own settlement has gone through.
+          const paid = !!winnerRecord?.won || report.did.some((d) => d.startsWith(`settle ${u.winner.toBase58().slice(0, 4)} on unit ${id}`));
           if (paid) {
             for (const [i, lot] of u.lots.entries()) {
               if (u.claimedMask & (1 << i)) continue;
               const mint = yard.catalog[lot.item].mint as PublicKey;
               const ata = getAssociatedTokenAddressSync(mint, u.winner);
               await step(`send ${lot.qty}x ${ITEMS[lot.item].name} from unit ${id}`, () => p.methods.claimLot(i)
-                .accountsPartial({ crank: k.keeper.publicKey, yard: YARD, unit: key, bidderRecord: bidderPda(key, u.winner), itemMint: mint, warehouse: warehousePda(mint), winnerTokenAccount: ata, tokenProgram: TOKEN_PROGRAM_ID })
+                .accountsPartial({ crank: k.keeper.publicKey, yard: YARD, unit: key, bidderRecord: bidderPda(key, u.winner), itemMint: mint, warehouse: warehousePda(mint), winnerTokenAccount: ata, vault: VAULT, treasury, tokenProgram: TOKEN_PROGRAM_ID })
                 .preInstructions([createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, ata, u.winner, mint)]).rpc());
             }
           }
@@ -297,27 +313,31 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
       const id = Number(yard.unitCount) + 1;
       const key = unitPda(id);
       const commit = createHash("sha256").update(saltFor(k, key)).digest();
-      await step(`create ${want === MULTI_SECONDS ? "multiplayer" : "solo"} unit ${id} + request draw`, async () => {
-        const draw = await p.methods.requestDraw().accountsPartial({ authority: k.keeper.publicKey, unit: key, oracleQueue: VRF_QUEUE }).instruction();
-        await p.methods.createUnit(new BN(id), new BN(want), new BN(MIN_BID), [...commit])
-          .accountsPartial({ authority: k.keeper.publicKey, yard: YARD, unit: key, systemProgram: SystemProgram.programId }).postInstructions([draw]).rpc();
-      });
+      // No draw yet: the unit's randomness is requested only when its line locks.
+      await step(`create ${want === MULTI_SECONDS ? "multiplayer" : "solo"} unit ${id}`, () => p.methods.createUnit(new BN(id), new BN(want), new BN(MIN_BID), [...commit])
+        .accountsPartial({ authority: k.keeper.publicKey, yard: YARD, unit: key, systemProgram: SystemProgram.programId }).rpc());
     }
 
     // The yard buys cheap listings and puts the items back in the warehouse future units are stocked from.
     const offers = await readListings();
-    const cheap = offers.find((l) => !l.seller.equals(k.keeper.publicKey) && l.price <= l.value * HOUSE_BUY_SHARE);
+    // A listing the buy just failed on is left alone for ten minutes, so one bad listing can't hold up the rest.
+    const cheap = offers.find((l) => !l.seller.equals(k.keeper.publicKey) && l.price <= l.value * HOUSE_BUY_SHARE && Date.now() - (skipListing.get(l.key.toBase58()) ?? 0) > 600_000);
     if (cheap) {
       const float = await connection.getTokenAccountBalance(treasury).then((b) => Number(b.value.amount), () => 0);
       const qty = Math.min(cheap.qty, 3);
       if (float >= 3 * USD + cheap.price * qty) {
-        await step(`house buys ${qty} from ${cheap.key.toBase58().slice(0, 6)}`, async () => {
+        const ok = await step(`house buys ${qty} from ${cheap.key.toBase58().slice(0, 6)}`, async () => {
           const ata = getAssociatedTokenAddressSync(cheap.mint, k.keeper.publicKey);
           await p.methods.buyItem(new BN(qty), new BN(cheap.price))
             .accountsPartial({ buyer: k.keeper.publicKey, yard: YARD, listing: cheap.key, seller: cheap.seller, stall: stallPda(cheap.key), buyerTokenAccount: treasury, sellerTokenAccount: getAssociatedTokenAddressSync(BID_MINT, cheap.seller), buyerItemAccount: ata, tokenProgram: TOKEN_PROGRAM_ID })
-            .preInstructions([createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, ata, k.keeper.publicKey, cheap.mint)])
+            .preInstructions([
+              createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, ata, k.keeper.publicKey, cheap.mint),
+              // The seller may have closed their USDC account; reopen it so they can be paid.
+              createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, getAssociatedTokenAddressSync(BID_MINT, cheap.seller), cheap.seller, BID_MINT),
+            ])
             .postInstructions([createTransferInstruction(ata, warehousePda(cheap.mint), k.keeper.publicKey, qty)]).rpc();
         });
+        if (!ok) skipListing.set(cheap.key.toBase58(), Date.now());
       }
     }
   } catch (e) {

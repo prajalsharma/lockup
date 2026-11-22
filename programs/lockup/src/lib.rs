@@ -7,7 +7,7 @@
 //!
 //! | Layer | Instructions |
 //! |---|---|
-//! | Solana | `init_yard`, `add_item`, `faucet`, `create_unit`, `request_draw`, `draw_callback`, `join_unit`, `start_unit`, `delegate_unit`, `settle_bidder`, `claim_lot`, `reclaim_stalled`, `list_item`, `buy_item`, `cancel_listing` |
+//! | Solana | `init_yard`, `add_item`, `create_unit`, `join_unit`, `start_unit` (locks the line and requests the VRF draw), `draw_callback`, `request_draw` (retry only), `delegate_unit`, `settle_bidder`, `claim_lot`, `reclaim_stalled`, `list_item`, `buy_item`, `cancel_listing` |
 //! | Private rollup | `init_unit_permission`, `stock_unit`, `seal_manifest`, `place_bid`, `seal_bid`, `close_unit`, `commit_unit` |
 //!
 //! ## How the contents stay hidden and still can't be rigged
@@ -25,7 +25,7 @@
 use anchor_lang::prelude::*;
 use solana_sha256_hasher::hashv;
 use anchor_lang::system_program::{transfer as transfer_lamports, Transfer as LamportsTransfer};
-use anchor_spl::token::{self, CloseAccount, Mint, MintTo, Token, TokenAccount, Transfer as SplTransfer};
+use anchor_spl::token::{self, CloseAccount, Mint, Token, TokenAccount, Transfer as SplTransfer};
 use ephemeral_rollups_sdk::{
     access_control::{
         instructions::CreateEphemeralPermissionCpi,
@@ -62,7 +62,6 @@ pub const UNIT_SEED: &[u8] = b"unit";
 pub const BIDDER_SEED: &[u8] = b"bidder";
 pub const BID_SEED: &[u8] = b"bid";
 pub const MANIFEST_SEED: &[u8] = b"manifest";
-pub const TAP_SEED: &[u8] = b"tap";
 pub const LISTING_SEED: &[u8] = b"listing";
 pub const STALL_SEED: &[u8] = b"stall";
 
@@ -70,9 +69,23 @@ pub const MIN_DURATION: i64 = 20;
 pub const MAX_DURATION: i64 = 900;
 /// After this long in line with no result on Solana, a bidder can take their deposit back.
 pub const RECLAIM_SECONDS: i64 = 3600;
-/// Test dollars per faucet call (6 decimals) and the wait between calls.
-pub const FAUCET_AMOUNT: u64 = 500_000_000;
-pub const FAUCET_COOLDOWN: i64 = 600;
+
+/// MagicBlock's devnet Private Ephemeral Rollup validator.
+pub const TEE_VALIDATOR: Pubkey = pubkey!("MTEWGuqxUpYZGFJQcp8tLN7x5v9BSeoFHYWQQ3n3xzo");
+/// Bit of `claimed_mask` set once the winning bid has been paid to the operator.
+pub const BID_PAID: u8 = 1 << 7;
+
+fn draw_request(payer: Pubkey, oracle_queue: Pubkey, unit: Pubkey) -> anchor_lang::solana_program::instruction::Instruction {
+    create_request_scoped_randomness_ix(RequestRandomnessParams {
+        payer,
+        oracle_queue,
+        callback_program_id: ID,
+        callback_discriminator: instruction::DrawCallback::DISCRIMINATOR.to_vec(),
+        caller_seed: unit.to_bytes(),
+        accounts_metas: Some(vec![SerializableAccountMeta { pubkey: unit, is_signer: false, is_writable: true }]),
+        ..Default::default()
+    })
+}
 
 fn reader(pubkey: Pubkey) -> Member {
     Member {
@@ -146,35 +159,7 @@ pub mod lockup {
         Ok(())
     }
 
-    /// Mint test dollars to the caller. Devnet only; the mint has no value.
-    pub fn faucet(ctx: Context<Faucet>) -> Result<()> {
-        let now = Clock::get()?.unix_timestamp;
-        let tap = &mut ctx.accounts.tap;
-        require!(
-            tap.last == 0 || now >= tap.last.saturating_add(FAUCET_COOLDOWN),
-            LockupError::FaucetCooldown
-        );
-        tap.last = now;
-        tap.bump = ctx.bumps.tap;
-
-        let id = ctx.accounts.yard.yard_id.to_le_bytes();
-        let bump = [ctx.accounts.yard.bump];
-        let seeds: &[&[u8]] = &[YARD_SEED, &id, &bump];
-        token::mint_to(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.key(),
-                MintTo {
-                    mint: ctx.accounts.bid_mint.to_account_info(),
-                    to: ctx.accounts.user_token_account.to_account_info(),
-                    authority: ctx.accounts.yard.to_account_info(),
-                },
-                &[seeds],
-            ),
-            FAUCET_AMOUNT,
-        )
-    }
-
-    /// Open a unit. `salt_commit` is sha256 of a salt the operator keeps until close.
+    /// Open a unit for people to line up. `salt_commit` is sha256 of a salt the operator keeps until close.
     pub fn create_unit(
         ctx: Context<CreateUnit>,
         unit_id: u64,
@@ -201,7 +186,10 @@ pub mod lockup {
         unit.yard = ctx.accounts.yard.key();
         unit.unit_id = unit_id;
         unit.authority = ctx.accounts.authority.key();
-        unit.status = UnitStatus::Created;
+        // The line opens at once. The random draw is not requested until the line locks, so
+        // nobody, the operator included, can know a unit's contents while people are still deciding
+        // whether to join it.
+        unit.status = UnitStatus::Open;
         unit.min_bid = min_bid;
         unit.duration = duration;
         unit.closes_at = 0;
@@ -232,33 +220,31 @@ pub mod lockup {
         Ok(())
     }
 
-    /// Ask MagicBlock VRF for the unit's randomness.
+    /// Ask MagicBlock VRF again for a locked unit whose draw has not arrived. `start_unit` makes
+    /// the first request; this exists only so a lost request cannot strand a unit.
     pub fn request_draw(ctx: Context<RequestDraw>) -> Result<()> {
-        require!(ctx.accounts.unit.status == UnitStatus::Created, LockupError::WrongStatus);
-        let ix = create_request_scoped_randomness_ix(RequestRandomnessParams {
-            payer: ctx.accounts.authority.key(),
-            oracle_queue: ctx.accounts.oracle_queue.key(),
-            callback_program_id: ID,
-            callback_discriminator: instruction::DrawCallback::DISCRIMINATOR.to_vec(),
-            caller_seed: ctx.accounts.unit.key().to_bytes(),
-            accounts_metas: Some(vec![SerializableAccountMeta {
-                pubkey: ctx.accounts.unit.key(),
-                is_signer: false,
-                is_writable: true,
-            }]),
-            ..Default::default()
-        });
-        ctx.accounts
-            .invoke_signed_vrf(&ctx.accounts.authority.to_account_info(), &ix)?;
+        let unit = &ctx.accounts.unit;
+        // `Created` is how units made before the draw moved behind the lock wait for theirs.
+        require!(unit.status == UnitStatus::Bidding || unit.status == UnitStatus::Created, LockupError::WrongStatus);
+        require!(unit.randomness == [0; 32], LockupError::AlreadyDrawn);
+        let ix = draw_request(ctx.accounts.authority.key(), ctx.accounts.oracle_queue.key(), unit.key());
+        ctx.accounts.invoke_signed_vrf(&ctx.accounts.authority.to_account_info(), &ix)?;
         Ok(())
     }
 
-    /// Called by the VRF program only. Stores the randomness and opens the line.
+    /// Called by the VRF program only. Stores the randomness, once, and starts the bidding clock.
     pub fn draw_callback(ctx: Context<DrawCallback>, randomness: [u8; 32]) -> Result<()> {
         let unit = &mut ctx.accounts.unit;
-        require!(unit.status == UnitStatus::Created, LockupError::WrongStatus);
+        require!(unit.randomness == [0; 32], LockupError::AlreadyDrawn);
+        match unit.status {
+            UnitStatus::Bidding => {
+                // The clock starts when the draw lands, so waiting for it costs bidders no time.
+                unit.closes_at = Clock::get()?.unix_timestamp.checked_add(unit.duration).ok_or(LockupError::Overflow)?;
+            }
+            UnitStatus::Created => unit.status = UnitStatus::Open,
+            _ => return err!(LockupError::WrongStatus),
+        }
         unit.randomness = randomness;
-        unit.status = UnitStatus::Open;
         msg!("Unit {} drawn", unit.unit_id);
         Ok(())
     }
@@ -298,16 +284,19 @@ pub mod lockup {
         Ok(())
     }
 
-    /// Close the line and start the clock. Runs just before delegation.
-    pub fn start_unit(ctx: Context<AuthorityUnit>) -> Result<()> {
+    /// Lock the line and ask MagicBlock VRF for the unit's randomness. From here nobody can
+    /// join or leave, and only now is the draw requested.
+    pub fn start_unit(ctx: Context<RequestDraw>) -> Result<()> {
         let unit = &mut ctx.accounts.unit;
         require!(unit.status == UnitStatus::Open, LockupError::WrongStatus);
         require!(!unit.slots.is_empty(), LockupError::NotInLine);
-        unit.closes_at = Clock::get()?
-            .unix_timestamp
-            .checked_add(unit.duration)
-            .ok_or(LockupError::Overflow)?;
+        unit.closes_at = Clock::get()?.unix_timestamp.checked_add(unit.duration).ok_or(LockupError::Overflow)?;
         unit.status = UnitStatus::Bidding;
+        // Units made before the draw moved behind the lock already have theirs.
+        if unit.randomness == [0; 32] {
+            let ix = draw_request(ctx.accounts.authority.key(), ctx.accounts.oracle_queue.key(), unit.key());
+            ctx.accounts.invoke_signed_vrf(&ctx.accounts.authority.to_account_info(), &ix)?;
+        }
         Ok(())
     }
 
@@ -317,11 +306,15 @@ pub mod lockup {
             let unit: Unit = read_account(&ctx.accounts.unit.to_account_info())?;
             require_keys_eq!(unit.authority, ctx.accounts.authority.key(), LockupError::Unauthorized);
             require!(unit.status == UnitStatus::Bidding, LockupError::WrongStatus);
+            // The contents are derived from the draw, so the unit cannot leave without it.
+            require!(unit.randomness != [0; 32], LockupError::NotDrawn);
             require_eq!(unit.unit_id, unit_id, LockupError::InvalidAccount);
         }
         let yard = ctx.accounts.yard.key();
         let id = unit_id.to_le_bytes();
+        // Only MagicBlock's private (TEE) validator may hold a unit: bids are only sealed there.
         let validator = ctx.accounts.validator.as_ref().map(|v| v.key());
+        require!(validator == Some(TEE_VALIDATOR), LockupError::InvalidAccount);
         ctx.accounts.delegate_unit(
             &ctx.accounts.authority,
             &[UNIT_SEED, yard.as_ref(), &id],
@@ -574,6 +567,7 @@ pub mod lockup {
 
     /// Pay one bidder what they are owed. Anyone can run it: the numbers come from the unit.
     /// The winner gets their deposit minus the winning bid. Everyone else gets it all back.
+    /// The winning bid itself waits in the vault for `claim_lot`.
     pub fn settle_bidder(ctx: Context<SettleBidder>) -> Result<()> {
         let unit = &ctx.accounts.unit;
         require!(unit.status == UnitStatus::Closed, LockupError::WrongStatus);
@@ -590,23 +584,8 @@ pub mod lockup {
         let id = ctx.accounts.yard.yard_id.to_le_bytes();
         let bump = [ctx.accounts.yard.bump];
         let seeds: &[&[u8]] = &[YARD_SEED, &id, &bump];
-        if won && unit.winning_bid > 0 {
-            // The winning bid is the price of the unit. It leaves the vault for the operator's
-            // treasury here, in the same instruction that returns the winner's change, so the
-            // vault only ever holds deposits that are still owed to someone.
-            token::transfer(
-                CpiContext::new_with_signer(
-                    ctx.accounts.token_program.key(),
-                    SplTransfer {
-                        from: ctx.accounts.vault.to_account_info(),
-                        to: ctx.accounts.treasury.to_account_info(),
-                        authority: ctx.accounts.yard.to_account_info(),
-                    },
-                    &[seeds],
-                ),
-                unit.winning_bid,
-            )?;
-        }
+        // The winning bid is not paid out here. It stays in the vault until the last lot has been
+        // delivered (`claim_lot`), so the operator is paid only after the winner has everything.
         if payout > 0 {
             token::transfer(
                 CpiContext::new_with_signer(
@@ -658,23 +637,59 @@ pub mod lockup {
             lot.qty as u64,
         )?;
         ctx.accounts.unit.claimed_mask |= 1 << lot_index;
+
+        // Last lot delivered: now, and only now, the winning bid leaves the vault for the operator.
+        let unit = &ctx.accounts.unit;
+        let all = ((1u16 << unit.lots.len()) - 1) as u8;
+        if unit.claimed_mask & all == all && unit.claimed_mask & BID_PAID == 0 && unit.winning_bid > 0 {
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.key(),
+                    SplTransfer {
+                        from: ctx.accounts.vault.to_account_info(),
+                        to: ctx.accounts.treasury.to_account_info(),
+                        authority: ctx.accounts.yard.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                unit.winning_bid,
+            )?;
+            ctx.accounts.unit.claimed_mask |= BID_PAID;
+        }
         Ok(())
     }
 
-    /// Escape hatch: an hour after joining, if the unit has no result on Solana, take the
-    /// whole deposit back. Works even while the unit is still held by the rollup.
+    /// Escape hatch: take the whole deposit back from a unit that has stalled.
+    ///
+    /// While the line is still open, an hour after joining: the bidder also leaves the line, so
+    /// the deposit they took back can no longer back a bid. Once the unit is locked, an hour
+    /// after its clock ran out with no result on Solana; by then bidding is over. Works while the
+    /// unit is still held by the rollup.
     pub fn reclaim_stalled(ctx: Context<ReclaimStalled>) -> Result<()> {
         let record = &ctx.accounts.bidder_record;
         require!(!record.settled, LockupError::AlreadySettled);
-        require!(
-            Clock::get()?.unix_timestamp >= record.joined_at.saturating_add(RECLAIM_SECONDS),
-            LockupError::TooEarly
-        );
-        // A unit back on Solana with a result must be settled the normal way.
+        let now = Clock::get()?.unix_timestamp;
+        let who = ctx.accounts.bidder.key();
+
         let unit_info = ctx.accounts.unit.to_account_info();
-        if *unit_info.owner == crate::ID {
-            let unit: Unit = read_account(&unit_info)?;
-            require!(unit.status != UnitStatus::Closed, LockupError::WrongStatus);
+        // A delegated unit is owned by the delegation program; its data on Solana is the state it
+        // left with, which is all that is needed here: its status and when its clock ends.
+        let mut unit: Unit = read_account(&unit_info)?;
+        match unit.status {
+            // A unit back on Solana with a result must be settled the normal way.
+            UnitStatus::Closed => return err!(LockupError::WrongStatus),
+            UnitStatus::Bidding => {
+                require!(now >= unit.closes_at.saturating_add(RECLAIM_SECONDS), LockupError::TooEarly);
+            }
+            UnitStatus::Created | UnitStatus::Open => {
+                require!(now >= record.joined_at.saturating_add(RECLAIM_SECONDS), LockupError::TooEarly);
+                require!(*unit_info.owner == crate::ID, LockupError::WrongStatus);
+                unit.slots.retain(|s| s.bidder != who);
+                // The account keeps its size; the tail left by the shorter list is zeroed.
+                let mut data = unit_info.try_borrow_mut_data()?;
+                data.fill(0);
+                unit.try_serialize(&mut &mut data[..])?;
+            }
         }
 
         let id = ctx.accounts.yard.yard_id.to_le_bytes();
@@ -760,6 +775,24 @@ pub mod lockup {
         )?;
         ctx.accounts.listing.qty -= qty;
         if ctx.accounts.listing.qty == 0 {
+            // Anyone can send extra tokens to a stall. A token account with a balance cannot be
+            // closed, so whatever is left over goes to the last buyer rather than jamming the sale.
+            ctx.accounts.stall.reload()?;
+            let extra = ctx.accounts.stall.amount;
+            if extra > 0 {
+                token::transfer(
+                    CpiContext::new_with_signer(
+                        ctx.accounts.token_program.key(),
+                        SplTransfer {
+                            from: ctx.accounts.stall.to_account_info(),
+                            to: ctx.accounts.buyer_item_account.to_account_info(),
+                            authority: ctx.accounts.yard.to_account_info(),
+                        },
+                        &[seeds],
+                    ),
+                    extra,
+                )?;
+            }
             // Sold out: close the stall and the listing, and return both rents to the seller.
             token::close_account(CpiContext::new_with_signer(
                 ctx.accounts.token_program.key(),
@@ -790,7 +823,9 @@ pub mod lockup {
                 },
                 &[seeds],
             ),
-            ctx.accounts.listing.qty,
+            // Everything in the stall, not just what was listed: a stranger's stray token must not
+            // be able to stop the seller closing it.
+            ctx.accounts.stall.amount,
         )?;
         token::close_account(CpiContext::new_with_signer(
             ctx.accounts.token_program.key(),
@@ -839,22 +874,6 @@ pub struct AddItem<'info> {
 }
 
 #[derive(Accounts)]
-pub struct Faucet<'info> {
-    #[account(mut)]
-    pub user: Signer<'info>,
-    #[account(seeds = [YARD_SEED, &yard.yard_id.to_le_bytes()], bump = yard.bump)]
-    pub yard: Box<Account<'info, Yard>>,
-    #[account(mut, address = yard.bid_mint @ LockupError::MintMismatch)]
-    pub bid_mint: Box<Account<'info, Mint>>,
-    #[account(mut, constraint = user_token_account.owner == user.key() @ LockupError::Unauthorized, constraint = user_token_account.mint == yard.bid_mint @ LockupError::MintMismatch)]
-    pub user_token_account: Box<Account<'info, TokenAccount>>,
-    #[account(init_if_needed, payer = user, space = 8 + Tap::INIT_SPACE, seeds = [TAP_SEED, yard.key().as_ref(), user.key().as_ref()], bump)]
-    pub tap: Box<Account<'info, Tap>>,
-    pub token_program: Program<'info, Token>,
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
 #[instruction(unit_id: u64)]
 pub struct CreateUnit<'info> {
     #[account(mut)]
@@ -871,7 +890,7 @@ pub struct CreateUnit<'info> {
 pub struct RequestDraw<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
-    #[account(seeds = [UNIT_SEED, unit.yard.as_ref(), &unit.unit_id.to_le_bytes()], bump = unit.bump, has_one = authority @ LockupError::Unauthorized)]
+    #[account(mut, seeds = [UNIT_SEED, unit.yard.as_ref(), &unit.unit_id.to_le_bytes()], bump = unit.bump, has_one = authority @ LockupError::Unauthorized)]
     pub unit: Box<Account<'info, Unit>>,
     /// CHECK: MagicBlock's oracle queue, pinned to the known addresses.
     #[account(mut, constraint = oracle_queue.key() == DEFAULT_QUEUE || oracle_queue.key() == DEFAULT_TEST_QUEUE @ LockupError::InvalidAccount)]
@@ -901,13 +920,6 @@ pub struct JoinUnit<'info> {
     pub vault: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-pub struct AuthorityUnit<'info> {
-    pub authority: Signer<'info>,
-    #[account(mut, seeds = [UNIT_SEED, unit.yard.as_ref(), &unit.unit_id.to_le_bytes()], bump = unit.bump, has_one = authority @ LockupError::Unauthorized)]
-    pub unit: Box<Account<'info, Unit>>,
 }
 
 #[delegate]
@@ -1039,9 +1051,6 @@ pub struct SettleBidder<'info> {
     pub bidder_token_account: Box<Account<'info, TokenAccount>>,
     #[account(mut, seeds = [VAULT_SEED, yard.key().as_ref()], bump, constraint = vault.key() == yard.vault @ LockupError::InvalidAccount)]
     pub vault: Box<Account<'info, TokenAccount>>,
-    /// Where winning bids are paid. Must belong to the yard's operator.
-    #[account(mut, constraint = treasury.owner == yard.authority @ LockupError::Unauthorized, constraint = treasury.mint == yard.bid_mint @ LockupError::MintMismatch)]
-    pub treasury: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -1060,6 +1069,11 @@ pub struct ClaimLot<'info> {
     pub warehouse: Box<Account<'info, TokenAccount>>,
     #[account(mut, constraint = winner_token_account.owner == unit.winner @ LockupError::NotWinner, constraint = winner_token_account.mint == item_mint.key() @ LockupError::MintMismatch)]
     pub winner_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [VAULT_SEED, yard.key().as_ref()], bump, constraint = vault.key() == yard.vault @ LockupError::InvalidAccount)]
+    pub vault: Box<Account<'info, TokenAccount>>,
+    /// Where the winning bid is paid once every lot is delivered. Must belong to the yard's operator.
+    #[account(mut, constraint = treasury.owner == yard.authority @ LockupError::Unauthorized, constraint = treasury.mint == yard.bid_mint @ LockupError::MintMismatch)]
+    pub treasury: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -1071,7 +1085,7 @@ pub struct ReclaimStalled<'info> {
     pub yard: Box<Account<'info, Yard>>,
     /// CHECK: may be owned by the delegation program while stuck on the rollup. Tied to the
     /// bidder record by address; the record names its yard.
-    #[account(address = bidder_record.unit @ LockupError::InvalidAccount)]
+    #[account(mut, address = bidder_record.unit @ LockupError::InvalidAccount)]
     pub unit: UncheckedAccount<'info>,
     #[account(mut, seeds = [BIDDER_SEED, unit.key().as_ref(), bidder.key().as_ref()], bump = bidder_record.bump, constraint = bidder_record.bidder == bidder.key() @ LockupError::Unauthorized, constraint = bidder_record.yard == yard.key() @ LockupError::InvalidAccount)]
     pub bidder_record: Box<Account<'info, Bidder>>,
