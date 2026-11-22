@@ -5,6 +5,7 @@ import { usePlayer } from "@/lib/chain/player";
 import type { Haul } from "@/lib/chain/types";
 import { explorer } from "@/lib/config";
 import { pad2, usd } from "@/lib/format";
+import { RollingUsd } from "@/components/juice";
 import { HOUSE_BUY_SHARE, ITEMS } from "@/lib/chain/shared";
 import { badges, standing } from "@/lib/rank";
 import { ItemArt, ItemTag } from "./item-art";
@@ -58,9 +59,9 @@ export function HaulView() {
     <>
       <dl className="grid grid-cols-2 gap-y-8 border-b border-line pb-10 md:grid-cols-4">
         <div><dt className="label text-ink-3">Units opened</dt><dd className="display num mt-1 text-[56px] leading-none">{wins.length}<span className="text-ink-3"> / {data.rounds.length}</span></dd></div>
-        <div><dt className="label text-ink-3">Paid for them</dt><dd className="display num mt-1 text-[56px] leading-none">{usd(paid)}</dd></div>
-        <div><dt className="label text-ink-3">{net >= 0 ? "Ahead by" : "Down by"}</dt><dd className={`display num mt-1 text-[56px] leading-none ${net >= 0 ? "text-accent-text" : "text-bad"}`}>{usd(Math.abs(net))}</dd></div>
-        <div><dt className="label text-ink-3">Devnet USDC</dt><dd className="display num mt-1 text-[56px] leading-none">{usd(data.dollars)}</dd></div>
+        <div><dt className="label text-ink-3">Paid for them</dt><dd className="mt-1"><RollingUsd from={0} value={paid} className="display num text-[56px]" /></dd></div>
+        <div><dt className="label text-ink-3">{net >= 0 ? "Ahead by" : "Down by"}</dt><dd className="mt-1"><RollingUsd from={0} value={Math.abs(net)} className={`display num text-[56px] ${net >= 0 ? "text-accent-text" : "text-bad"}`} /></dd></div>
+        <div><dt className="label text-ink-3">Devnet USDC</dt><dd className="mt-1"><RollingUsd from={0} value={data.dollars} className="display num text-[56px]" /></dd></div>
       </dl>
 
       <section className="grid gap-10 border-b border-line py-10 lg:grid-cols-[0.8fr_1fr]" aria-labelledby="rank">

@@ -5,6 +5,7 @@ import { ChainFlowLive } from "@/components/chain-flow";
 import { clueText, useChainYard } from "@/components/chain-rounds";
 import { Door, useReducedMotion } from "@/components/door/door";
 import { ItemTag } from "@/components/item-art";
+import { Burst, Decode, RollingUsd, SlideToSeal, Slip } from "@/components/juice";
 import { usePlayer } from "@/lib/chain/player";
 import { verdict } from "@/lib/rank";
 import { Connection, PublicKey } from "@solana/web3.js";
@@ -93,6 +94,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const [amount, setAmount] = useState(0.4);
   const [shown, setShown] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [live, setLive] = useState(false);
   const prev = useRef<string>("");
 
   const status = unit?.status;
@@ -105,6 +107,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
     setFound([true, true, true]);
     if (first || reduced) { setShown(true); return; }
     if (was === "closed") return;
+    setLive(true);
     sfx.unlock();
     const a = setTimeout(() => sfx.door(2.1), 320);
     const b = setTimeout(() => setShown(true), 2700);
@@ -136,6 +139,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const onFound = (i: number) => setFound((f) => { if (f[i]) return f; sfx.clue(); const n = [...f]; n[i] = true; return n; });
   const maxBid = mine ? mine.deposit : 0;
   const bidAmt = maxBid > 0 ? Math.min(maxBid, amount) : amount;
+  const seal = () => p.bid(unit.id, bidAmt).then((ok) => { if (ok) sfx.lock(); return !!ok; });
   // You can deposit up to what the wallet holds, capped at $5 so one unit can't swallow a balance.
   // A wallet with no USDC yet is sent 1 USDC when it lines up, so plan around that.
   const spendable = p.dollars && p.dollars > 0 ? p.dollars : 1;
@@ -235,7 +239,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
           )}
 
           {biddingOpen && mine && !mine.hasBid && (
-            <form noValidate onSubmit={(e) => { e.preventDefault(); void p.bid(unit.id, bidAmt).then((ok) => ok && sfx.lock()); }}>
+            <form noValidate onSubmit={(e) => { e.preventDefault(); void seal(); }}>
               <div className="flex items-end justify-between gap-4">
                 <label htmlFor="bid" className="label text-ink-3">Your sealed bid</label>
                 <span className="label num text-ink-3">{usd(unit.minBid)} to {usd(maxBid)}</span>
@@ -245,7 +249,8 @@ export function LiveStage({ unitId }: { unitId: number }) {
                 <input id="bid" type="number" inputMode="decimal" step="0.05" min={unit.minBid} max={maxBid} value={bidAmt} onChange={(e) => setAmount(Math.min(maxBid, Math.max(0, Number(e.target.value) || 0)))} className="display num w-full bg-transparent text-[72px] leading-none outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none" />
               </div>
               <input type="range" className="bid mt-1" min={unit.minBid} max={maxBid} step={0.05} value={Math.min(maxBid, Math.max(unit.minBid, amount))} onChange={(e) => setAmount(Number(e.target.value))} aria-label="Bid amount" />
-              <button type="submit" className="btn btn-primary mt-4 w-full" disabled={!!p.busy || bidAmt < unit.minBid}>{p.busy ?? "Seal my bid"} {!p.busy && <span className="arrow" aria-hidden>→</span>}</button>
+              <SlideToSeal label="Slide to seal your bid" busy={p.busy} disabled={!!p.busy || bidAmt < unit.minBid} onSeal={seal} />
+              <button type="submit" className="sr-only" disabled={!!p.busy || bidAmt < unit.minBid}>Seal my bid</button>
               <p className="mt-3 text-sm text-ink-2">Your bid goes to MagicBlock's private rollup. Nobody else can read it until the door opens.{!p.isQuick && " Your wallet will ask you to sign a message to open the rollup, then to approve the bid."}</p>
             </form>
           )}
@@ -280,13 +285,13 @@ export function LiveStage({ unitId }: { unitId: number }) {
                       {b.house && <span className="label ml-3 text-ink-3">House</span>}
                       {unit.winner === b.who && <span className="label ml-3 text-ink-3">Highest</span>}
                     </span>
-                    <span className="num text-[17px]">{b.bid === null ? "no bid" : usd(b.bid)}</span>
+                    <span className="num text-[17px]">{b.bid === null ? "no bid" : <Decode text={usd(b.bid)} delay={i * 220} />}</span>
                   </li>
                 ))}
               </ol>
               {shown && (
                 <div className="rise mt-7">
-                  {won && <span className={`stamp display float-right ml-4 border-2 px-3 py-1 text-[24px] leading-none ${verdict(unit.winningBid, unit.value).good ? "border-accent-text text-accent-text" : "border-bad text-bad"}`}>{verdict(unit.winningBid, unit.value).word}</span>}
+                  {won && <span className={`stamp display relative float-right ml-4 border-2 px-3 py-1 text-[24px] leading-none ${verdict(unit.winningBid, unit.value).good ? "border-accent-text text-accent-text" : "border-bad text-bad"}`}>{verdict(unit.winningBid, unit.value).word}{live && <Burst />}</span>}
                   <p className="display text-[44px] leading-none md:text-[56px]">
                     {won ? <>You opened <span className="hl">unit {pad2(unit.id)}</span></> : mine ? (mine.bid === null ? "You sat this one out" : "Outbid") : unit.winner ? `Went for ${usd(unit.winningBid)}` : "Nobody bid"}
                   </p>
@@ -306,8 +311,16 @@ export function LiveStage({ unitId }: { unitId: number }) {
                   {won && (
                     <p className="mt-1 flex items-baseline justify-between border-t border-line-2 pt-4">
                       <span className="label text-ink-3">{unit.value >= unit.winningBid ? "You came out ahead by" : "You overpaid by"}</span>
-                      <span className={`display num text-[40px] leading-none ${unit.value >= unit.winningBid ? "text-accent-text" : "text-bad"}`}>{usd(Math.abs(unit.value - unit.winningBid))}</span>
+                      <RollingUsd from={0} value={Math.abs(unit.value - unit.winningBid)} className={`display num text-[40px] ${unit.value >= unit.winningBid ? "text-accent-text" : "text-bad"}`} />
                     </p>
+                  )}
+                  {mine && (
+                    <Slip
+                      title={`Unit ${pad2(unit.id)} · your slip`}
+                      rows={[["Deposit you put in", mine.deposit], [won ? "Winning bid paid" : "Paid", won ? unit.winningBid : 0]]}
+                      total={["Back to your wallet", won ? Math.max(0, mine.deposit - unit.winningBid) : mine.deposit]}
+                      foot="Sent by MagicBlock when the result reached Solana. Nobody has to press a button."
+                    />
                   )}
                   {won && unit.claimed && <Link href="/haul" className="btn btn-ghost mt-5">Keep or sell what you found <span className="arrow" aria-hidden>→</span></Link>}
                   <div className="mt-6 flex flex-wrap gap-3">

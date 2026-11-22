@@ -4,6 +4,7 @@ import { PRIVY_GOOGLE } from "@/lib/chain/email-wallet";
 import { usePlayer } from "@/lib/chain/player";
 import { explorer } from "@/lib/config";
 import { short, usd } from "@/lib/format";
+import { RollingUsd } from "@/components/juice";
 
 /** Header button: "Connect wallet", or the connected address with a small menu. */
 export function ConnectButton() {
@@ -26,7 +27,7 @@ export function ConnectButton() {
       <button type="button" className="btn btn-ghost btn-sm" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
         {p.walletIcon && <img src={p.walletIcon} alt="" width={16} height={16} />}
         <span className="num">{short(p.address)}</span>
-        <span className="num hidden text-ink-2 sm:inline">{p.dollars === null ? "" : usd(p.dollars)}</span>
+        <span className="num hidden text-ink-2 sm:inline">{p.dollars === null ? "" : <RollingUsd value={p.dollars} />}</span>
       </button>
       {menu && (
         <div role="menu" className="absolute right-0 top-[46px] z-50 w-[280px] border border-line-2 bg-ground p-4">

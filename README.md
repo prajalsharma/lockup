@@ -41,6 +41,8 @@ rollup), and every unit's page shows the same map pinned to where that unit is r
 - **Best pickers.** A leaderboard on the yard page, ranked by how far ahead each wallet is.
 - **Look through the keyhole.** During bidding, anyone can ask the private rollup and Solana for another
   bidder's sealed bid and see what comes back.
+- **It moves like a game.** You slide a bolt to seal a bid, the sealed bids decode when the door opens,
+  your balance rolls as the payout lands, and a slip prints what you put in, paid and got back.
 
 ## MagicBlock features used
 
@@ -107,4 +109,5 @@ Set `NEXT_PUBLIC_PRIVY_APP_ID` to add email and Google sign-in (Privy) to the wa
 - `docs/screens` screenshots
 
 The delegation, permission and commit patterns follow MagicBlock's sealed-auction example and an
-earlier MagicBlock project of mine. Anton is used under the SIL Open Font License.
+earlier MagicBlock project of mine. Anton is used under the SIL Open Font License. The rolling digits, decoding text,
+slide-to-seal bolt and win burst are adapted from [EasyUI](https://github.com/Surajmaurya1/easyui) (MIT, © 2026 Suraj Maurya).
