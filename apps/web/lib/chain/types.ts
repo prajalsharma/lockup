@@ -27,6 +27,8 @@ export interface ChainYard {
   settled: number;
   keeper: boolean;
   units: ChainUnit[];
+  /** Players ranked by what they came out ahead across the units they opened. House bidders are left out. */
+  board: { who: string; opened: number; profit: number; best: number }[];
   readAt: number;
 }
 

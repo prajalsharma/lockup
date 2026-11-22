@@ -35,7 +35,18 @@ export async function GET() {
         draw: u.randomness.every((b: number) => b === 0) ? "" : Buffer.from(u.randomness.slice(0, 8)).toString("hex"),
       };
     });
-    const body: ChainYard = { programId: PROGRAM.toBase58(), yard: YARD.toBase58(), unitCount: Number(yard.unitCount), settled: all.filter((x) => "closed" in x.u.status).length, keeper: !!k, units: out, readAt: Date.now() };
+    const tally = new Map<string, { who: string; opened: number; profit: number; best: number }>();
+    for (const { u } of all) {
+      if (!("closed" in u.status) || u.winner.equals(PublicKey.default)) continue;
+      const who = u.winner.toBase58();
+      if (house.has(who)) continue;
+      const gain = u.value / 100 - Number(u.winningBid) / 1e6;
+      const t = tally.get(who) ?? { who, opened: 0, profit: 0, best: -Infinity };
+      t.opened++; t.profit += gain; t.best = Math.max(t.best, gain);
+      tally.set(who, t);
+    }
+    const board = [...tally.values()].sort((a, b) => b.profit - a.profit).slice(0, 8).map((t) => ({ ...t, profit: Math.round(t.profit * 100) / 100, best: Math.round(t.best * 100) / 100 }));
+    const body: ChainYard = { programId: PROGRAM.toBase58(), yard: YARD.toBase58(), unitCount: Number(yard.unitCount), settled: all.filter((x) => "closed" in x.u.status).length, keeper: !!k, units: out, board, readAt: Date.now() };
     cache = { at: Date.now(), body };
     return NextResponse.json(body);
   } catch (e) {

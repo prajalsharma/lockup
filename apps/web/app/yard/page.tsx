@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ChainRounds } from "@/components/chain-rounds";
+import { Board } from "@/components/board";
 import { LiveCorridor } from "@/components/live/live-corridor";
 import { PROGRAM_ID, explorer } from "@/lib/config";
 
@@ -27,6 +28,14 @@ export default function YardPage() {
         ))}
       </ol>
       <div className="mt-12"><LiveCorridor /></div>
+
+      <section className="mt-28" aria-labelledby="board">
+        <div className="grid gap-6 lg:grid-cols-[1fr_1fr] lg:items-end">
+          <h2 id="board" className="display text-[clamp(48px,6.4vw,96px)]">Best pickers</h2>
+          <p className="max-w-[520px] text-[17px] text-ink-2 lg:justify-self-end">Ranked by how far ahead each wallet is: what their units held, minus what they paid. Read from the opened units on chain. House bidders don't count.</p>
+        </div>
+        <div className="mt-10"><Board /></div>
+      </section>
 
       <section className="mt-28" aria-labelledby="onchain">
         <div className="grid gap-6 lg:grid-cols-[1fr_1fr] lg:items-end">

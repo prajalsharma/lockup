@@ -6,6 +6,7 @@ import { HOUSE_BUY_SHARE } from "@/lib/chain/shared";
 import type { MarketListing } from "@/lib/chain/types";
 import { explorer } from "@/lib/config";
 import { usd } from "@/lib/format";
+import { ItemArt } from "./item-art";
 
 /** Open listings, re-read every few seconds and right after the player does something. */
 export function useMarket() {
@@ -48,11 +49,14 @@ export function MarketView() {
           const off = Math.round((1 - l.price / l.value) * 100);
           return (
             <li key={l.address} className="grid gap-x-10 gap-y-3 border-b border-line py-6 md:grid-cols-[1fr_180px_200px] md:items-center">
-              <div>
+              <div className="flex items-center gap-5">
+                <ItemArt id={l.id} className={`h-14 w-14 shrink-0 ${l.rarity === 2 ? "text-accent-text" : "text-ink-2"}`} />
+                <div>
                 <p className={`text-[22px] font-semibold ${l.rarity === 2 ? "text-accent-text" : ""}`}>{l.name}{l.qty > 1 ? ` × ${l.qty}` : ""}</p>
                 <p className="mt-1 text-sm text-ink-2">
                   Appraised {usd(l.value)}{l.rarity > 0 ? ` · ${l.rarity === 2 ? "grail" : "rare"}` : ""} · sold by {mine ? "you" : short(l.seller)} · <a className="ulink ulink-on" href={explorer(l.address)} target="_blank" rel="noreferrer">listing on explorer</a>
                 </p>
+              </div>
               </div>
               <div>
                 <p className="display num text-[40px] leading-none">{usd(l.price)}</p>

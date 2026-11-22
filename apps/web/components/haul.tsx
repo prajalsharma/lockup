@@ -5,7 +5,9 @@ import { usePlayer } from "@/lib/chain/player";
 import type { Haul } from "@/lib/chain/types";
 import { explorer } from "@/lib/config";
 import { pad2, usd } from "@/lib/format";
-import { HOUSE_BUY_SHARE } from "@/lib/chain/shared";
+import { HOUSE_BUY_SHARE, ITEMS } from "@/lib/chain/shared";
+import { badges, standing } from "@/lib/rank";
+import { ItemArt, ItemTag } from "./item-art";
 import { useMarket } from "./market";
 
 export function HaulView() {
@@ -44,6 +46,11 @@ export function HaulView() {
   const got = wins.reduce((s, r) => s + r.value, 0);
   const net = got - paid;
   const shelf = data.items.reduce((s, i) => s + i.value, 0);
+  const st = standing(data.rounds);
+  const earned = badges(data.rounds);
+  // Found = ever pulled out of a unit you opened, or sitting in the wallet now (bought on the market).
+  const found = new Set<string>([...wins.flatMap((r) => r.lots.map((l) => l.id)), ...data.items.map((i) => i.id)]);
+  const holding = new Map(data.items.map((i) => [i.id, i.qty]));
   const mine = (market.listings ?? []).filter((l) => l.seller === p.address);
   const done = (ok: boolean) => { if (ok) { setSelling(null); setTimeout(() => { setTick((t) => t + 1); void market.read(); }, 1500); } };
 
@@ -56,9 +63,42 @@ export function HaulView() {
         <div><dt className="label text-ink-3">Devnet USDC</dt><dd className="display num mt-1 text-[56px] leading-none">{usd(data.dollars)}</dd></div>
       </dl>
 
+      <section className="grid gap-10 border-b border-line py-10 lg:grid-cols-[0.8fr_1fr]" aria-labelledby="rank">
+        <div>
+          <p className="label text-ink-3">Yard rank</p>
+          <h2 id="rank" className="display mt-1 text-[clamp(48px,6vw,88px)] text-accent-text">{st.rank}</h2>
+          <div className="mt-4 h-[6px] w-full max-w-[420px] bg-line" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(st.progress * 100)} aria-label="Progress to the next rank">
+            <div className="h-full origin-left bg-accent transition-transform duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]" style={{ transform: `scaleX(${st.progress})` }} />
+          </div>
+          <p className="mt-3 text-ink-2">{st.next ? `Open ${st.toNext} more ${st.toNext === 1 ? "unit" : "units"} to make ${st.next}.` : "Top of the yard."} Rank comes from the units this wallet has opened on chain.</p>
+        </div>
+        <ul className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3" aria-label="Badges">
+          {earned.map((b) => (
+            <li key={b.id} className={b.earned ? "" : "text-ink-3"}>
+              <p className={`display text-[26px] leading-none ${b.earned ? "text-ink" : ""}`}>{b.name}</p>
+              <p className="mt-1.5 text-[14px] text-ink-2">{b.earned ? "Earned." : b.how}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="mt-14" aria-labelledby="collection">
+        <div className="flex items-baseline justify-between">
+          <h2 id="collection" className="display text-[clamp(36px,4vw,56px)]">Collection</h2>
+          <p className="label num text-ink-3">{found.size} of {ITEMS.length} found</p>
+        </div>
+        <ul className="mt-5 grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6">
+          {ITEMS.map((it, i) => (
+            <li key={it.id} className="rise" style={{ ["--i" as string]: i * 0.4 }}>
+              <ItemTag id={it.id} name={it.name} rarity={it.rarity} qty={holding.get(it.id) ?? 1} found={found.has(it.id)} line={`${usd(it.value / 100)}${found.has(it.id) && !holding.has(it.id) ? " · sold" : ""}`} />
+            </li>
+          ))}
+        </ul>
+      </section>
+
       <section className="mt-14" aria-labelledby="shelf">
         <div className="flex items-baseline justify-between">
-          <h2 id="shelf" className="display text-[clamp(36px,4vw,56px)]">On your shelf</h2>
+          <h2 id="shelf" className="display text-[clamp(36px,4vw,56px)]">Keep or sell</h2>
           <p className="label num text-ink-3">Token balances in your wallet · appraised {usd(shelf)}</p>
         </div>
         {data.items.length === 0 ? (
@@ -71,9 +111,12 @@ export function HaulView() {
               const listed = mine.some((l) => l.mint === i.mint);
               return (
                 <li key={i.id} className="grid gap-x-8 gap-y-3 border-b border-line py-4 md:grid-cols-[1fr_auto] md:items-center">
-                  <div>
-                    <a href={explorer(i.mint)} target="_blank" rel="noreferrer" className={`text-[17px] font-semibold hover:underline ${i.rarity === 2 ? "text-accent-text" : ""}`}>{i.qty > 1 ? `${i.qty} × ` : ""}{i.name}</a>
-                    <p className="label num mt-1 text-ink-3">{usd(each)} each{i.rarity > 0 ? ` · ${i.rarity === 2 ? "grail" : "rare"}` : ""}</p>
+                  <div className="flex items-center gap-4">
+                    <ItemArt id={i.id} className={`h-11 w-11 shrink-0 ${i.rarity === 2 ? "text-accent-text" : "text-ink-2"}`} />
+                    <div>
+                      <a href={explorer(i.mint)} target="_blank" rel="noreferrer" className={`text-[17px] font-semibold hover:underline ${i.rarity === 2 ? "text-accent-text" : ""}`}>{i.qty > 1 ? `${i.qty} × ` : ""}{i.name}</a>
+                      <p className="label num mt-1 text-ink-3">{usd(each)} each{i.rarity > 0 ? ` · ${i.rarity === 2 ? "grail" : "rare"}` : ""}</p>
+                    </div>
                   </div>
                   {listed ? (
                     <p className="text-sm text-ink-2">One listing per item. Take the open one back to list again.</p>

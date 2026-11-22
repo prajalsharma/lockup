@@ -31,6 +31,17 @@ The mode is public on chain: multiplayer units are created with a 90-second cloc
 The landing page has an animated map of where each step happens (Solana, MagicBlock VRF, the private
 rollup), and every unit's page shows the same map pinned to where that unit is right now.
 
+## What makes it a game
+
+- **Twelve finds, three tiers.** Every item has its own drawn tag. Common, rare and grail are drawn with
+  different odds, and the collection on My haul fills in as you find them.
+- **Yard rank and badges.** Rookie to Yard boss by units opened, with badges such as Steal and By a nose.
+  All of it is worked out from a wallet's rounds on chain; nothing is stored for it.
+- **A verdict when the door opens.** Steal, Good buy or Burned, from what you paid against what it held.
+- **Best pickers.** A leaderboard on the yard page, ranked by how far ahead each wallet is.
+- **Look through the keyhole.** During bidding, anyone can ask the private rollup and Solana for another
+  bidder's sealed bid and see what comes back.
+
 ## MagicBlock features used
 
 | Feature | Where |

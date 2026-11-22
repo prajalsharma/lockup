@@ -4,8 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { ChainFlowLive } from "@/components/chain-flow";
 import { clueText, useChainYard } from "@/components/chain-rounds";
 import { Door, useReducedMotion } from "@/components/door/door";
+import { ItemTag } from "@/components/item-art";
 import { usePlayer } from "@/lib/chain/player";
-import { MULTI_LINE_SECONDS } from "@/lib/chain/shared";
+import { verdict } from "@/lib/rank";
+import { Connection, PublicKey } from "@solana/web3.js";
+import { MULTI_LINE_SECONDS, RPC, TEE_RPC, bidPda } from "@/lib/chain/shared";
 import type { ChainUnit } from "@/lib/chain/types";
 import { explorer } from "@/lib/config";
 import { clock, pad2, short, usd } from "@/lib/format";
@@ -29,6 +32,43 @@ function Line({ unit, me }: { unit: ChainUnit; me: string | null }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * Lets anyone test the seal for themselves: ask the private rollup, and then Solana, for another
+ * bidder's sealed bid, and show exactly what came back.
+ */
+function Keyhole({ unit, me }: { unit: ChainUnit; me: string | null }) {
+  const [out, setOut] = useState<{ rollup: string; solana: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const other = unit.bids.find((b) => b.hasBid && b.who !== me);
+  if (!other) return null;
+  const look = async () => {
+    setBusy(true);
+    const key = bidPda(new PublicKey(unit.address), new PublicKey(other.who));
+    const ask = async (url: string) => {
+      try {
+        const a = await new Connection(url, "confirmed").getAccountInfo(key);
+        return a && a.data.length ? `It answered with ${a.data.length} bytes. That should not happen.` : "Nothing came back.";
+      } catch { return "It refused to answer."; }
+    };
+    const [rollup, solana] = await Promise.all([ask(TEE_RPC), ask(RPC)]);
+    setOut({ rollup, solana });
+    setBusy(false);
+  };
+  return (
+    <div className="border-t border-line pt-5">
+      <p className="text-[17px]">Think you can read {other.house ? "a house bidder's" : "another player's"} bid?</p>
+      <p className="mt-1 text-sm text-ink-2">{short(other.who)} has sealed one. This asks MagicBlock's private rollup for it, and then Solana.</p>
+      <button type="button" className="btn btn-ghost btn-sm mt-3" disabled={busy} onClick={() => void look()}>{busy ? "Looking" : out ? "Look again" : "Look through the keyhole"}</button>
+      {out && (
+        <dl className="rise mt-4 grid gap-x-8 gap-y-2 text-[15px] sm:grid-cols-[auto_1fr]">
+          <dt className="label text-ink-3">Private rollup</dt><dd>{out.rollup}</dd>
+          <dt className="label text-ink-3">Solana</dt><dd>{out.solana === "Nothing came back." ? "Nothing there. The bid only exists inside the rollup." : out.solana}</dd>
+        </dl>
+      )}
     </div>
   );
 }
@@ -221,6 +261,8 @@ export function LiveStage({ unitId }: { unitId: number }) {
 
           {unit.status === "bidding" && unit.stocked && left <= 0 && !mine?.hasBid && <Step title="Opening the bids">Every sealed bid is read at once. The result is on its way to Solana.</Step>}
           {unit.status === "bidding" && !mine && left > 0 && <p className="text-ink-2">This door is already locked, so you can only watch. <Link className="ulink ulink-on text-ink" href="/yard">Pick an open door to play.</Link></p>}
+          {unit.status === "bidding" && unit.stocked && <Keyhole unit={unit} me={me} />}
+
           {unit.status === "bidding" && mine && !mine.hasBid && left <= 0 && unit.stocked && <p className="text-ink-2">You didn't bid in time. Your whole deposit comes back when the unit settles.</p>}
 
           {p.error && me && <p role="alert" className="text-sm text-bad">{p.error}</p>}
@@ -244,6 +286,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
               </ol>
               {shown && (
                 <div className="rise mt-7">
+                  {won && <span className={`stamp display float-right ml-4 border-2 px-3 py-1 text-[24px] leading-none ${verdict(unit.winningBid, unit.value).good ? "border-accent-text text-accent-text" : "border-bad text-bad"}`}>{verdict(unit.winningBid, unit.value).word}</span>}
                   <p className="display text-[44px] leading-none md:text-[56px]">
                     {won ? <>You opened <span className="hl">unit {pad2(unit.id)}</span></> : mine ? (mine.bid === null ? "You sat this one out" : "Outbid") : unit.winner ? `Went for ${usd(unit.winningBid)}` : "Nobody bid"}
                   </p>
@@ -252,18 +295,14 @@ export function LiveStage({ unitId }: { unitId: number }) {
                       ? `You paid ${usd(unit.winningBid)}. ${unit.claimed ? "The items are in your wallet and the rest of your deposit is back." : "The items are on their way to your wallet."}`
                       : mine ? "Your whole deposit is on its way back." : "Here is what was inside."}
                   </p>
-                  <ul className="mt-5 border-t border-line">
-                    {unit.lots.map((l) => (
-                      <li key={l.id} className="flex items-center justify-between gap-4 border-b border-line py-2.5">
-                        <span>
-                          {l.qty > 1 && <span className="num text-ink-3">{l.qty} × </span>}{l.name}
-                          {l.rarity > 0 && <span className={`label ml-3 ${l.rarity === 2 ? "text-accent-text" : "text-ink-3"}`}>{l.rarity === 2 ? "grail" : "rare"}</span>}
-                        </span>
-                        <span className="num">{usd(l.value)}</span>
+                  <ul className="mt-5 grid grid-cols-3 gap-2 sm:grid-cols-4">
+                    {unit.lots.map((l, i) => (
+                      <li key={l.id} className="rise" style={{ ["--i" as string]: i * 1.6 }}>
+                        <ItemTag id={l.id} name={l.name} rarity={l.rarity} qty={l.qty} line={usd(l.value)} />
                       </li>
                     ))}
-                    <li className="flex items-center justify-between py-3"><span className="label text-ink-3">Appraised total</span><span className="num text-[20px]">{usd(unit.value)}</span></li>
                   </ul>
+                  <p className="mt-4 flex items-center justify-between border-t border-line py-3"><span className="label text-ink-3">Appraised total</span><span className="num text-[20px]">{usd(unit.value)}</span></p>
                   {won && (
                     <p className="mt-1 flex items-baseline justify-between border-t border-line-2 pt-4">
                       <span className="label text-ink-3">{unit.value >= unit.winningBid ? "You came out ahead by" : "You overpaid by"}</span>
