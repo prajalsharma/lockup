@@ -31,6 +31,22 @@ The mode is public on chain: multiplayer units are created with a 90-second cloc
 The landing page has an animated map of where each step happens (Solana, MagicBlock VRF, the private
 rollup), and every unit's page shows the same map pinned to where that unit is right now.
 
+## Anyone can fill a unit
+
+Units are no longer stocked by the operator alone, and the operator no longer keeps every winning bid.
+
+- **Consign.** A player hands items they hold to the yard (`consign`). They join the warehouse that
+  units are drawn from, so MagicBlock VRF still decides which unit each one comes out of.
+- **Paid by the program.** When a lot is delivered to a winner, `claim_lot` pays that lot's share of
+  the winning bid out of the vault. If a player has that item waiting, the share goes to them. The
+  program refuses a claim that skips a waiting consignment, so players' items sell before the yard's own.
+- **A price record per item.** One `Pool` account per item holds what it has sold for inside units
+  and on the resale market: count, total paid and last price. The Market page reads it.
+
+A sealed bid is how things with no obvious price get one: estate lots, storage units, one-off
+collectibles. Lockup is that auction with the vault, resale market and price record behind it. The
+twelve items are game tokens standing in for real goods; nothing here is backed by a physical object.
+
 ## What makes it a game
 
 - **Twelve finds, three tiers.** Every item has its own drawn tag. Common, rare and grail are drawn with
@@ -93,6 +109,7 @@ pnpm dev                 # site on http://localhost:3000
 pnpm test:program        # game-rule tests
 pnpm round               # one full round on devnet, every step asserted
 pnpm market              # list, buy and cancel on devnet, with the refusals checked
+pnpm consign             # the seller pool: consign, take back, and the refusals
 pnpm attack              # join a live unit and try to cheat it; every attempt must be refused
 ```
 
@@ -105,7 +122,7 @@ Set `NEXT_PUBLIC_PRIVY_APP_ID` to add email and Google sign-in (Privy) to the wa
 
 - `programs/lockup` Anchor program; `src/engine.rs` holds the pure game rules and their tests
 - `apps/web` Next.js 15 site: 3D door, live yard, wallet connect (Solana Wallet Adapter), keeper
-- `scripts` devnet setup, end-to-end round, resale test, local keeper
+- `scripts` devnet setup, end-to-end round, resale and seller-pool tests, local keeper
 - `docs/screens` screenshots
 
 The delegation, permission and commit patterns follow MagicBlock's sealed-auction example and an

@@ -72,4 +72,8 @@ pub enum LockupError {
     AlreadyDrawn,
     #[msg("This unit's draw has not arrived yet")]
     NotDrawn,
+    #[msg("Consigned items of this kind are waiting and sell first")]
+    ConsignedFirst,
+    #[msg("You don't have that many consigned")]
+    NotEnoughConsigned,
 }

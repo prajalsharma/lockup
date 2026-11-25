@@ -24,8 +24,10 @@ Pins: `anchor-lang 1.0.2`, `ephemeral-rollups-sdk 0.16.2` (features `anchor`, `a
    the delegation program: the winner gets `deposit − bid`, everyone else their full deposit. Fees come from
    the operator's escrow on Solana. The actions are not atomic with the commit, so `settle_bidder` does the
    same payout by hand if one fails; the keeper waits 25 seconds before stepping in.
-   `claim_lot` moves each lot from the warehouse to the winner. The winning bid stays in the vault
-   until the last lot is delivered, and only then goes to the operator's treasury. All permissionless.
+   `claim_lot` moves each lot from the warehouse to the winner and, in the same instruction, releases
+   that lot's share of the winning bid from the vault. Shares go by appraised value and the last lot
+   takes the rounding remainder, so they always add up to the bid. A share goes to the operator's
+   treasury unless a player's consigned item filled the lot (see the seller pool). All permissionless.
 9. **Stall.** `reclaim_stalled` returns a deposit from a unit that has stalled: while the line is still
    open, an hour after joining (the bidder also leaves the line); once locked, an hour after the clock
    ran out with no result on Solana.
@@ -45,6 +47,30 @@ The keeper also acts as a buyer: it takes any listing priced at half the apprais
 the items back to the warehouse that future units are stocked from. That buyer is a rule in the
 keeper, paid from the operator's treasury; the chain does not guarantee it.
 
+## The seller pool
+
+Units are stocked from one warehouse per item. Players can add to it and are paid when their items sell.
+
+- `init_pool` opens one `Pool` account per item. It holds the count of players' items waiting and the
+  item's price record.
+- `consign(qty)` moves items from the player's wallet into the warehouse and records them in a
+  `Consignment` (one per player per item; consigning again adds to it). Because the items join the
+  shared warehouse, the VRF draw still decides which unit they come out of, and nobody can tell from
+  balances which unit holds whose item.
+- `withdraw_consignment(qty)` returns items that have not sold yet.
+- `claim_lot` checks the item's `Pool`. If any player items are waiting, the caller must pass a
+  `Consignment` with stock, or the claim is refused (`ConsignedFirst`). That player's token account
+  receives the lot's share of the winning bid, in proportion to how many of the lot's items were
+  theirs; the rest goes to the treasury. The payout account's owner must be the consigning player.
+  After the transfer, the warehouse must still hold at least every item players have waiting.
+
+What the chain does not decide is which player is paid when several have the same item waiting. The
+keeper passes whoever has sold least.
+
+Every sale is written to the item's `Pool`: `auction_sold`, `auction_paid`, `auction_last` from
+`claim_lot`, and `market_sold`, `market_paid`, `market_last` from `buy_item`. Prices are per item in
+the bid currency's smallest unit. This is the price record on the Market page.
+
 ## Accounts
 
 | Account | Lives on | Who can read it | Holds |
@@ -56,6 +82,8 @@ keeper, paid from the operator's treasury; the chain does not guarantee it.
 | `Manifest` | private rollup | operator | the contents, until close |
 | `Bid` | private rollup | its bidder only | the amount |
 | `Listing` + stall | Solana | anyone | seller, item, price each, quantity; the stall holds the items |
+| `Pool` | Solana | anyone | one per item: players' items waiting, and what the item has sold for inside units and on the market |
+| `Consignment` | Solana | anyone | one player's items of one kind handed to the yard: waiting, sold, earned |
 
 ## What is trusted
 
@@ -83,8 +111,8 @@ The program was reviewed with an AI security agent before submission. What chang
 
 - A bidder who took a stalled deposit back stayed in line and could still bid with money they no longer
   had at stake. Reclaiming now removes them from the line, or is only possible after bidding is over.
-- The operator was paid the winning bid before the items were delivered. It is now paid in the same
-  instruction that delivers the last lot.
+- The operator was paid the winning bid before the items were delivered. Each lot's share is now
+  released in the same instruction that delivers that lot.
 - The random draw was requested when a unit was created, so the operator could see contents before anyone
   joined and abandon units it did not like. The draw is now requested when the line locks.
 - A stray token sent to a listing's stall could stop the seller cancelling or the last item selling.
@@ -111,8 +139,14 @@ only that the transaction failed and that the honest bid afterwards still went t
 price, a buy of more than is listed, payment to the wrong wallet, a second listing of the same item
 and a cancel by someone else are all refused.
 
+`pnpm consign` opens the item shelves and checks the seller pool: consigning, topping up, taking back,
+and the refusals (nothing, more than held, someone else's items, more than is waiting). It leaves one of
+every item consigned by a test seller so the next round pays a player.
+
 `pnpm round` drives a whole round with two wallets and asserts every step, including the privacy
-reads and exact settlement amounts. The hosted site has also been played end to end with the in-browser
+reads and exact settlement amounts. It checks that each lot releases exactly its share of the bid, that
+the shares add up to the winning bid, that a claim which skips a waiting consignment is refused, and
+that a consigned item's share cannot be sent to anyone but its seller. The hosted site has also been played end to end with the in-browser
 quick wallet. Wallet extensions connect through Solana Wallet Adapter. That path has been played end to end on the
 hosted site with an injected wallet implementing the Wallet Standard interface (connect, signTransaction,
 signMessage); a real Phantom, Solflare or Backpack install has not been driven. Email sign-in through

@@ -61,6 +61,8 @@ export function pdas(programId: PublicKey) {
     bidder: (unit: PublicKey, who: PublicKey) => PublicKey.findProgramAddressSync([enc("bidder"), unit.toBuffer(), who.toBuffer()], programId)[0],
     bid: (unit: PublicKey, who: PublicKey) => PublicKey.findProgramAddressSync([enc("bid"), unit.toBuffer(), who.toBuffer()], programId)[0],
     manifest: (unit: PublicKey) => PublicKey.findProgramAddressSync([enc("manifest"), unit.toBuffer()], programId)[0],
+    pool: (mint: PublicKey) => PublicKey.findProgramAddressSync([enc("pool"), yard.toBuffer(), mint.toBuffer()], programId)[0],
+    consign: (seller: PublicKey, mint: PublicKey) => PublicKey.findProgramAddressSync([enc("consign"), yard.toBuffer(), seller.toBuffer(), mint.toBuffer()], programId)[0],
     tap: (who: PublicKey) => PublicKey.findProgramAddressSync([enc("tap"), yard.toBuffer(), who.toBuffer()], programId)[0],
   };
 }
@@ -81,3 +83,18 @@ export const CATALOG = [
   { id: "bar", name: "Gold bar", value: 400, rarity: 2, group: 4, heavy: true },
 ];
 export const WEIGHT = [50, 15, 3];
+
+/**
+ * What `claim_lot` needs for one item: a player's waiting consignment and where to pay them, when
+ * the pool has any, since consigned items sell before the yard's own stock. Nulls otherwise.
+ */
+export async function consignedFor(program: Program, connection: Connection, yard: PublicKey, mint: PublicKey, bidMint: PublicKey) {
+  const { getAssociatedTokenAddressSync } = await import("@solana/spl-token");
+  const [pool] = PublicKey.findProgramAddressSync([enc("pool"), yard.toBuffer(), mint.toBuffer()], program.programId);
+  const state: any = await (program.account as any).pool.fetch(pool);
+  if (Number(state.consigned) === 0) return { pool, consignment: null, sellerPayout: null, seller: null };
+  const all = await (program.account as any).consignment.all([{ memcmp: { offset: 8, bytes: yard.toBase58() } }, { memcmp: { offset: 72, bytes: mint.toBase58() } }]);
+  const pick = all.filter((c: any) => Number(c.account.qty) > 0).sort((a: any, b: any) => Number(a.account.sold) - Number(b.account.sold))[0];
+  if (!pick) return { pool, consignment: null, sellerPayout: null, seller: null };
+  return { pool, consignment: pick.publicKey as PublicKey, sellerPayout: getAssociatedTokenAddressSync(bidMint, pick.account.seller), seller: pick.account.seller as PublicKey };
+}

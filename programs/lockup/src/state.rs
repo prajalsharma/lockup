@@ -168,3 +168,39 @@ pub struct Listing {
     pub qty: u64,
     pub bump: u8,
 }
+
+/// One item type's shelf in the yard: how many consigned items are waiting in the warehouse, and
+/// the price record anyone can read. Auction prices are each lot's share of a winning bid;
+/// market prices are fixed-price resales.
+#[account]
+#[derive(InitSpace)]
+pub struct Pool {
+    pub yard: Pubkey,
+    pub mint: Pubkey,
+    /// Player-owned items waiting in the warehouse. They are sold before the yard's own stock.
+    pub consigned: u64,
+    pub auction_sold: u64,
+    /// Bid currency paid for those items, in its smallest unit.
+    pub auction_paid: u64,
+    /// Price of one item in the most recent unit it came out of.
+    pub auction_last: u64,
+    pub market_sold: u64,
+    pub market_paid: u64,
+    pub market_last: u64,
+    pub bump: u8,
+}
+
+/// Items one wallet has handed to the yard to be sold inside units. When one of them comes out
+/// of a unit, its share of the winning bid is paid to the seller by the program.
+#[account]
+#[derive(InitSpace)]
+pub struct Consignment {
+    pub yard: Pubkey,
+    pub seller: Pubkey,
+    pub mint: Pubkey,
+    /// Still waiting to be sold. Can be taken back at any time.
+    pub qty: u64,
+    pub sold: u64,
+    pub earned: u64,
+    pub bump: u8,
+}

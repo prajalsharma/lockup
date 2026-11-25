@@ -7,7 +7,7 @@
 //!
 //! | Layer | Instructions |
 //! |---|---|
-//! | Solana | `init_yard`, `add_item`, `create_unit`, `join_unit`, `start_unit` (locks the line and requests the VRF draw), `draw_callback`, `request_draw` (retry only), `delegate_unit`, `settle_bidder`, `settle_on_commit` (Magic Action), `claim_lot`, `reclaim_stalled`, `list_item`, `buy_item`, `cancel_listing` |
+//! | Solana | `init_yard`, `add_item`, `create_unit`, `join_unit`, `start_unit` (locks the line and requests the VRF draw), `draw_callback`, `request_draw` (retry only), `delegate_unit`, `settle_bidder`, `settle_on_commit` (Magic Action), `claim_lot`, `reclaim_stalled`, `list_item`, `buy_item`, `cancel_listing`, `init_pool`, `consign`, `withdraw_consignment` |
 //! | Private rollup | `init_unit_permission`, `stock_unit`, `seal_manifest`, `place_bid`, `seal_bid`, `close_unit`, `commit_unit`, `commit_and_settle` (commit plus a Magic Action per bidder that pays them on Solana) |
 //!
 //! ## How the contents stay hidden and still can't be rigged
@@ -60,6 +60,8 @@ declare_id!("2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR");
 pub const YARD_SEED: &[u8] = b"yard";
 pub const VAULT_SEED: &[u8] = b"vault";
 pub const WAREHOUSE_SEED: &[u8] = b"warehouse";
+pub const POOL_SEED: &[u8] = b"pool";
+pub const CONSIGN_SEED: &[u8] = b"consign";
 pub const UNIT_SEED: &[u8] = b"unit";
 pub const BIDDER_SEED: &[u8] = b"bidder";
 pub const BID_SEED: &[u8] = b"bid";
@@ -701,10 +703,55 @@ pub mod lockup {
         )?;
         ctx.accounts.unit.claimed_mask |= 1 << lot_index;
 
-        // Last lot delivered: now, and only now, the winning bid leaves the vault for the operator.
+        // This lot's share of the winning bid leaves the vault now that the lot is delivered, and
+        // not before. Shares go by appraised value; the last lot takes the rounding remainder, so
+        // the shares always add up to the winning bid whatever order the lots are claimed in.
         let unit = &ctx.accounts.unit;
-        let all = ((1u16 << unit.lots.len()) - 1) as u8;
-        if unit.claimed_mask & all == all && unit.claimed_mask & BID_PAID == 0 && unit.winning_bid > 0 {
+        let worth = |l: &Lot| -> u128 {
+            unit.catalog.get(l.item as usize).map(|f| f.value as u128 * l.qty as u128).unwrap_or(0)
+        };
+        let total: u128 = unit.lots.iter().map(worth).sum();
+        let bid = unit.winning_bid as u128;
+        let cut = |l: &Lot| -> u128 { if total == 0 { 0 } else { bid * worth(l) / total } };
+        let last = unit.lots.len() - 1;
+        let share = if i == last {
+            bid.saturating_sub(unit.lots[..last].iter().map(cut).sum::<u128>())
+        } else {
+            cut(&lot)
+        } as u64;
+
+        // Consigned items sell before the yard's own stock, so the operator cannot keep a sale
+        // for itself while a player's item waits.
+        let qty = lot.qty as u64;
+        let mut used = 0u64;
+        let mut to_seller = 0u64;
+        if ctx.accounts.pool.consigned > 0 {
+            let c = ctx.accounts.consignment.as_mut().ok_or(LockupError::ConsignedFirst)?;
+            require!(c.qty > 0, LockupError::ConsignedFirst);
+            used = qty.min(c.qty);
+            to_seller = (share as u128 * used as u128 / qty as u128) as u64;
+            c.qty -= used;
+            c.sold = c.sold.checked_add(used).ok_or(LockupError::Overflow)?;
+            c.earned = c.earned.checked_add(to_seller).ok_or(LockupError::Overflow)?;
+            if to_seller > 0 {
+                let payout = ctx.accounts.seller_payout.as_ref().ok_or(LockupError::InvalidAccount)?;
+                require_keys_eq!(payout.owner, c.seller, LockupError::Unauthorized);
+                token::transfer(
+                    CpiContext::new_with_signer(
+                        ctx.accounts.token_program.key(),
+                        SplTransfer {
+                            from: ctx.accounts.vault.to_account_info(),
+                            to: payout.to_account_info(),
+                            authority: ctx.accounts.yard.to_account_info(),
+                        },
+                        &[seeds],
+                    ),
+                    to_seller,
+                )?;
+            }
+        }
+        let to_house = share - to_seller;
+        if to_house > 0 {
             token::transfer(
                 CpiContext::new_with_signer(
                     ctx.accounts.token_program.key(),
@@ -715,8 +762,21 @@ pub mod lockup {
                     },
                     &[seeds],
                 ),
-                unit.winning_bid,
+                to_house,
             )?;
+        }
+
+        let pool = &mut ctx.accounts.pool;
+        pool.consigned -= used;
+        pool.auction_sold = pool.auction_sold.checked_add(qty).ok_or(LockupError::Overflow)?;
+        pool.auction_paid = pool.auction_paid.checked_add(share).ok_or(LockupError::Overflow)?;
+        pool.auction_last = share / qty;
+        // What is left in the warehouse must still cover every item players have waiting.
+        ctx.accounts.warehouse.reload()?;
+        require!(ctx.accounts.warehouse.amount >= pool.consigned, LockupError::NotEnoughConsigned);
+
+        let all = ((1u16 << ctx.accounts.unit.lots.len()) - 1) as u8;
+        if ctx.accounts.unit.claimed_mask & all == all {
             ctx.accounts.unit.claimed_mask |= BID_PAID;
         }
         Ok(())
@@ -836,6 +896,10 @@ pub mod lockup {
             ),
             qty,
         )?;
+        let pool = &mut ctx.accounts.pool;
+        pool.market_sold = pool.market_sold.checked_add(qty).ok_or(LockupError::Overflow)?;
+        pool.market_paid = pool.market_paid.checked_add(cost).ok_or(LockupError::Overflow)?;
+        pool.market_last = ctx.accounts.listing.price;
         ctx.accounts.listing.qty -= qty;
         if ctx.accounts.listing.qty == 0 {
             // Anyone can send extra tokens to a stall. A token account with a balance cannot be
@@ -899,6 +963,69 @@ pub mod lockup {
             },
             &[seeds],
         ))?;
+        Ok(())
+    }
+
+    // ----------------------------------------------------------- Solana: the seller pool
+
+    /// Open the shelf for one item type: its consignment count and price record. Anyone can pay for it.
+    pub fn init_pool(ctx: Context<InitPool>) -> Result<()> {
+        let mint = ctx.accounts.item_mint.key();
+        require!(ctx.accounts.yard.catalog.iter().any(|i| i.mint == mint), LockupError::NotInCatalog);
+        let pool = &mut ctx.accounts.pool;
+        pool.yard = ctx.accounts.yard.key();
+        pool.mint = mint;
+        pool.bump = ctx.bumps.pool;
+        Ok(())
+    }
+
+    /// Hand items you hold to the yard to be sold inside units. They go into the warehouse that
+    /// units are stocked from; the random draw decides which unit they come out of. When they
+    /// do, `claim_lot` pays you their share of the winning bid.
+    pub fn consign(ctx: Context<Consign>, qty: u64) -> Result<()> {
+        require!(qty > 0, LockupError::BadListing);
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                SplTransfer {
+                    from: ctx.accounts.seller_item_account.to_account_info(),
+                    to: ctx.accounts.warehouse.to_account_info(),
+                    authority: ctx.accounts.seller.to_account_info(),
+                },
+            ),
+            qty,
+        )?;
+        let c = &mut ctx.accounts.consignment;
+        c.yard = ctx.accounts.yard.key();
+        c.seller = ctx.accounts.seller.key();
+        c.mint = ctx.accounts.item_mint.key();
+        c.qty = c.qty.checked_add(qty).ok_or(LockupError::Overflow)?;
+        c.bump = ctx.bumps.consignment;
+        let pool = &mut ctx.accounts.pool;
+        pool.consigned = pool.consigned.checked_add(qty).ok_or(LockupError::Overflow)?;
+        Ok(())
+    }
+
+    /// Take back consigned items that have not been sold yet.
+    pub fn withdraw_consignment(ctx: Context<WithdrawConsignment>, qty: u64) -> Result<()> {
+        require!(qty > 0 && qty <= ctx.accounts.consignment.qty, LockupError::NotEnoughConsigned);
+        let id = ctx.accounts.yard.yard_id.to_le_bytes();
+        let bump = [ctx.accounts.yard.bump];
+        let seeds: &[&[u8]] = &[YARD_SEED, &id, &bump];
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.key(),
+                SplTransfer {
+                    from: ctx.accounts.warehouse.to_account_info(),
+                    to: ctx.accounts.seller_item_account.to_account_info(),
+                    authority: ctx.accounts.yard.to_account_info(),
+                },
+                &[seeds],
+            ),
+            qty,
+        )?;
+        ctx.accounts.consignment.qty -= qty;
+        ctx.accounts.pool.consigned -= qty;
         Ok(())
     }
 }
@@ -1176,9 +1303,17 @@ pub struct ClaimLot<'info> {
     pub winner_token_account: Box<Account<'info, TokenAccount>>,
     #[account(mut, seeds = [VAULT_SEED, yard.key().as_ref()], bump, constraint = vault.key() == yard.vault @ LockupError::InvalidAccount)]
     pub vault: Box<Account<'info, TokenAccount>>,
-    /// Where the winning bid is paid once every lot is delivered. Must belong to the yard's operator.
+    /// Where the yard's share of the winning bid is paid. Must belong to the yard's operator.
     #[account(mut, constraint = treasury.owner == yard.authority @ LockupError::Unauthorized, constraint = treasury.mint == yard.bid_mint @ LockupError::MintMismatch)]
     pub treasury: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [POOL_SEED, yard.key().as_ref(), item_mint.key().as_ref()], bump = pool.bump)]
+    pub pool: Box<Account<'info, Pool>>,
+    /// A player's waiting items of this kind. Required whenever the pool has any.
+    #[account(mut, seeds = [CONSIGN_SEED, yard.key().as_ref(), consignment.seller.as_ref(), item_mint.key().as_ref()], bump = consignment.bump)]
+    pub consignment: Option<Box<Account<'info, Consignment>>>,
+    /// The consigning player's account for the bid currency. Its owner is checked against the consignment.
+    #[account(mut, constraint = seller_payout.mint == yard.bid_mint @ LockupError::MintMismatch)]
+    pub seller_payout: Option<Box<Account<'info, TokenAccount>>>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -1238,6 +1373,8 @@ pub struct BuyItem<'info> {
     pub seller_token_account: Box<Account<'info, TokenAccount>>,
     #[account(mut, constraint = buyer_item_account.owner == buyer.key() @ LockupError::Unauthorized, constraint = buyer_item_account.mint == listing.mint @ LockupError::MintMismatch)]
     pub buyer_item_account: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [POOL_SEED, yard.key().as_ref(), listing.mint.as_ref()], bump = pool.bump)]
+    pub pool: Box<Account<'info, Pool>>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -1253,5 +1390,54 @@ pub struct CancelListing<'info> {
     pub stall: Box<Account<'info, TokenAccount>>,
     #[account(mut, constraint = seller_item_account.owner == seller.key() @ LockupError::Unauthorized, constraint = seller_item_account.mint == listing.mint @ LockupError::MintMismatch)]
     pub seller_item_account: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct InitPool<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(seeds = [YARD_SEED, &yard.yard_id.to_le_bytes()], bump = yard.bump)]
+    pub yard: Box<Account<'info, Yard>>,
+    pub item_mint: Box<Account<'info, Mint>>,
+    #[account(init, payer = payer, space = 8 + Pool::INIT_SPACE, seeds = [POOL_SEED, yard.key().as_ref(), item_mint.key().as_ref()], bump)]
+    pub pool: Box<Account<'info, Pool>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct Consign<'info> {
+    #[account(mut)]
+    pub seller: Signer<'info>,
+    #[account(seeds = [YARD_SEED, &yard.yard_id.to_le_bytes()], bump = yard.bump)]
+    pub yard: Box<Account<'info, Yard>>,
+    pub item_mint: Box<Account<'info, Mint>>,
+    #[account(mut, seeds = [POOL_SEED, yard.key().as_ref(), item_mint.key().as_ref()], bump = pool.bump)]
+    pub pool: Box<Account<'info, Pool>>,
+    /// One per seller per item. Consigning again adds to it.
+    #[account(init_if_needed, payer = seller, space = 8 + Consignment::INIT_SPACE, seeds = [CONSIGN_SEED, yard.key().as_ref(), seller.key().as_ref(), item_mint.key().as_ref()], bump)]
+    pub consignment: Box<Account<'info, Consignment>>,
+    #[account(mut, constraint = seller_item_account.owner == seller.key() @ LockupError::Unauthorized, constraint = seller_item_account.mint == item_mint.key() @ LockupError::MintMismatch)]
+    pub seller_item_account: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [WAREHOUSE_SEED, yard.key().as_ref(), item_mint.key().as_ref()], bump)]
+    pub warehouse: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct WithdrawConsignment<'info> {
+    #[account(mut)]
+    pub seller: Signer<'info>,
+    #[account(seeds = [YARD_SEED, &yard.yard_id.to_le_bytes()], bump = yard.bump)]
+    pub yard: Box<Account<'info, Yard>>,
+    #[account(mut, seeds = [POOL_SEED, yard.key().as_ref(), consignment.mint.as_ref()], bump = pool.bump)]
+    pub pool: Box<Account<'info, Pool>>,
+    #[account(mut, has_one = seller @ LockupError::Unauthorized, seeds = [CONSIGN_SEED, yard.key().as_ref(), seller.key().as_ref(), consignment.mint.as_ref()], bump = consignment.bump)]
+    pub consignment: Box<Account<'info, Consignment>>,
+    #[account(mut, constraint = seller_item_account.owner == seller.key() @ LockupError::Unauthorized, constraint = seller_item_account.mint == consignment.mint @ LockupError::MintMismatch)]
+    pub seller_item_account: Box<Account<'info, TokenAccount>>,
+    #[account(mut, seeds = [WAREHOUSE_SEED, yard.key().as_ref(), consignment.mint.as_ref()], bump)]
+    pub warehouse: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
 }

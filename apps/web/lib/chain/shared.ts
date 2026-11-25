@@ -29,6 +29,8 @@ export const warehousePda = (mint: PublicKey) => pda([enc("warehouse"), YARD.toB
 
 export const listingPda = (seller: PublicKey, mint: PublicKey) => pda([enc("listing"), YARD.toBuffer(), seller.toBuffer(), mint.toBuffer()]);
 export const stallPda = (listing: PublicKey) => pda([enc("stall"), listing.toBuffer()]);
+export const poolPda = (mint: PublicKey) => pda([enc("pool"), YARD.toBuffer(), mint.toBuffer()]);
+export const consignPda = (seller: PublicKey, mint: PublicKey) => pda([enc("consign"), YARD.toBuffer(), seller.toBuffer(), mint.toBuffer()]);
 /** The yard buys any listing priced at or under this share of the appraisal and returns it to the pool. */
 export const HOUSE_BUY_SHARE = 0.5;
 

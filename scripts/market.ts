@@ -46,7 +46,7 @@ async function main() {
   check("listed", Number((await getAccount(connection, stall)).amount) === 3, tx(s1));
   check("a second listing of the same item is refused", await fails(() => sp.methods.listItem(PRICE, new BN(1)).accountsPartial({ seller: seller.publicKey, yard: p.yard, itemMint, sellerItemAccount: sellerItem.address, listing, stall, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).rpc(), "already in use"));
 
-  const buyAccounts = { buyer: buyer.publicKey, yard: p.yard, listing, seller: seller.publicKey, stall, buyerTokenAccount: buyerUsd.address, sellerTokenAccount: sellerUsd.address, buyerItemAccount: buyerItem.address, tokenProgram: TOKEN_PROGRAM_ID };
+  const buyAccounts = { buyer: buyer.publicKey, yard: p.yard, listing, seller: seller.publicKey, stall, buyerTokenAccount: buyerUsd.address, sellerTokenAccount: sellerUsd.address, buyerItemAccount: buyerItem.address, pool: p.pool(itemMint), tokenProgram: TOKEN_PROGRAM_ID };
   console.log("\n▸ buy");
   check("a buy below the asking price is refused", await fails(() => bp.methods.buyItem(new BN(1), new BN(10_000)).accountsPartial(buyAccounts).rpc(), "PriceChanged"));
   check("buying more than is listed is refused", await fails(() => bp.methods.buyItem(new BN(4), PRICE).accountsPartial(buyAccounts).rpc(), "NotEnoughListed"));

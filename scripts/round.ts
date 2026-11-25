@@ -15,7 +15,7 @@ import {
   EPHEMERAL_VAULT_ID, MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID, PERMISSION_PROGRAM_ID, createTopUpEscrowInstruction, escrowPdaFromEscrowAuthority, permissionPdaFromAccount,
 } from "@magicblock-labs/ephemeral-rollups-sdk";
 import {
-  CATALOG, RPC, TEE_VALIDATOR, USD, VRF_QUEUE, cachedKeypair, loadIdl, loadKeypair, pdas, programFor, sleep, teeConnection, tx,
+  CATALOG, RPC, TEE_VALIDATOR, USD, VRF_QUEUE, cachedKeypair, consignedFor, loadIdl, loadKeypair, pdas, programFor, sleep, teeConnection, tx,
 } from "./lib";
 
 const DURATION = Number(process.env.DURATION ?? 45);
@@ -279,17 +279,39 @@ async function main() {
   const winner = u.winner as PublicKey;
   const lotCount = (u.lots as any[]).length;
   const treasuryAt = async () => BigInt((await connection.getTokenAccountBalance(treasury)).value.amount);
-  const treasuryBefore = await treasuryAt();
+  // Each lot's share of the winning bid, worked out the way the program does: by appraised value,
+  // with the last lot taking the rounding remainder.
+  const bidTotal = BigInt(u.winningBid.toString());
+  const worth = (l: any) => BigInt(CATALOG[l.item].value) * BigInt(l.qty);
+  const allWorth = (u.lots as any[]).reduce((n: bigint, l: any) => n + worth(l), 0n);
+  const cuts = (u.lots as any[]).map((l: any) => (bidTotal * worth(l)) / allWorth);
+  cuts[lotCount - 1] = bidTotal - cuts.slice(0, lotCount - 1).reduce((n, c) => n + c, 0n);
+  let paidOut = 0n, due = 0n, toSellers = 0n, guarded = false;
   for (const [i, lot] of (u.lots as any[]).entries()) {
-    // The operator is paid the winning bid only when the last lot has been delivered.
-    if (i === lotCount - 1) record("operator not paid while a lot is still undelivered", (await treasuryAt()) === treasuryBefore);
     const mint = yard.catalog[lot.item].mint as PublicKey;
     try {
       const ata = await retry(() => getOrCreateAssociatedTokenAccount(connection, operator, mint, winner));
       const before = BigInt(ata.amount.toString());
-      await retry(() => program.methods.claimLot(i).accountsPartial({ crank: operator.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, winner), itemMint: mint, warehouse: p.warehouse(mint), winnerTokenAccount: ata.address, vault: p.vault, treasury, tokenProgram: TOKEN_PROGRAM_ID }).rpc());
+      // A player's consigned item sells before the yard's own stock, and that player is paid.
+      const c = await consignedFor(program, connection, p.yard, mint, bidMint);
+      const sellerAta = c.seller ? await retry(() => getOrCreateAssociatedTokenAccount(connection, operator, bidMint, c.seller!)) : null;
+      const sellerBefore = sellerAta ? BigInt(sellerAta.amount.toString()) : 0n;
+      const houseBefore = await treasuryAt();
+      if (c.consignment && !guarded) {
+        guarded = true;
+        const claim = (over: object) => program.methods.claimLot(i).accountsPartial({ crank: operator.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, winner), itemMint: mint, warehouse: p.warehouse(mint), winnerTokenAccount: ata.address, vault: p.vault, treasury, pool: c.pool, consignment: c.consignment, sellerPayout: c.sellerPayout, tokenProgram: TOKEN_PROGRAM_ID, ...over } as any).simulate();
+        const refusedWith = async (over: object, want: RegExp) => { try { await claim(over); console.log("      NOT refused"); return false; } catch (e) { const text = JSON.stringify((e as any)?.simulationResponse ?? "") + String(e); if (!want.test(text)) console.log("      got:", text.slice(0, 600)); return want.test(text); } };
+        record("the operator cannot skip a waiting consignment and keep the sale", await refusedWith({ consignment: null, sellerPayout: null }, /ConsignedFirst/));
+        record("a consigned item's share cannot be paid to anyone but its seller", await refusedWith({ sellerPayout: getAssociatedTokenAddressSync(bidMint, winner) }, /Unauthorized/));
+      }
+      await retry(() => program.methods.claimLot(i).accountsPartial({ crank: operator.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, winner), itemMint: mint, warehouse: p.warehouse(mint), winnerTokenAccount: ata.address, vault: p.vault, treasury, pool: c.pool, consignment: c.consignment, sellerPayout: c.sellerPayout, tokenProgram: TOKEN_PROGRAM_ID } as any).rpc());
       const after = BigInt((await connection.getTokenAccountBalance(ata.address)).value.amount);
       record(`claim ${lot.qty}× ${CATALOG[lot.item].name}`, after - before === BigInt(lot.qty));
+      const sellerGot = sellerAta ? BigInt((await connection.getTokenAccountBalance(sellerAta.address)).value.amount) - sellerBefore : 0n;
+      toSellers += sellerGot;
+      paidOut += (await treasuryAt()) - houseBefore + sellerGot;
+      due += cuts[i];
+      record(`lot ${i} released exactly its share of the bid${sellerGot ? " (part to a consigning player)" : ""}`, paidOut === due, `$${Number(cuts[i]) / 1e6}`);
     } catch (e) {
       // A retry after a timeout finds the lot already delivered, which is the outcome wanted.
       if (/AlreadyClaimed/.test(String((e as any)?.message ?? e))) record(`claim lot ${i} (delivered on an earlier attempt)`, true);
@@ -297,8 +319,7 @@ async function main() {
     }
     await sleep(800);
   }
-
-  record("operator paid the winning bid after the last lot", (await treasuryAt()) - treasuryBefore === BigInt(u.winningBid.toString()), `+${Number((await treasuryAt()) - treasuryBefore) / 1e6}`);
+  record("the whole winning bid was paid out once every lot was delivered", paidOut === bidTotal, `$${Number(paidOut) / 1e6}, of which $${Number(toSellers) / 1e6} to consigning players`);
 
   // Anyone can now recompute the draw: the salt is public and must match the commitment.
   u = await (program.account as any).unit.fetch(unit);

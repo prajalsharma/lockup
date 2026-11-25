@@ -238,6 +238,32 @@
           "writable": true
         },
         {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "listing.mint",
+                "account": "Listing"
+              }
+            ]
+          }
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
@@ -521,9 +547,79 @@
         {
           "name": "treasury",
           "docs": [
-            "Where the winning bid is paid once every lot is delivered. Must belong to the yard's operator."
+            "Where the yard's share of the winning bid is paid. Must belong to the yard's operator."
           ],
           "writable": true
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "item_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "consignment",
+          "docs": [
+            "A player's waiting items of this kind. Required whenever the pool has any."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  115,
+                  105,
+                  103,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "consignment.seller",
+                "account": "Consignment"
+              },
+              {
+                "kind": "account",
+                "path": "item_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller_payout",
+          "docs": [
+            "The consigning player's account for the bid currency. Its owner is checked against the consignment."
+          ],
+          "writable": true,
+          "optional": true
         },
         {
           "name": "token_program",
@@ -711,6 +807,163 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "consign",
+      "docs": [
+        "Hand items you hold to the yard to be sold inside units. They go into the warehouse that",
+        "units are stocked from; the random draw decides which unit they come out of. When they",
+        "do, `claim_lot` pays you their share of the winning bid."
+      ],
+      "discriminator": [
+        28,
+        24,
+        180,
+        90,
+        49,
+        127,
+        205,
+        24
+      ],
+      "accounts": [
+        {
+          "name": "seller",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "yard",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard.yard_id",
+                "account": "Yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "item_mint"
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "item_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "consignment",
+          "docs": [
+            "One per seller per item. Consigning again adds to it."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  115,
+                  105,
+                  103,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "seller"
+              },
+              {
+                "kind": "account",
+                "path": "item_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller_item_account",
+          "writable": true
+        },
+        {
+          "name": "warehouse",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  114,
+                  101,
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "item_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "qty",
+          "type": "u64"
+        }
+      ]
     },
     {
       "name": "create_unit",
@@ -1097,6 +1350,83 @@
           }
         }
       ]
+    },
+    {
+      "name": "init_pool",
+      "docs": [
+        "Open the shelf for one item type: its consignment count and price record. Anyone can pay for it."
+      ],
+      "discriminator": [
+        116,
+        233,
+        199,
+        204,
+        115,
+        159,
+        171,
+        36
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "yard",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard.yard_id",
+                "account": "Yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "item_mint"
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "item_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
     },
     {
       "name": "init_unit_permission",
@@ -2733,6 +3063,157 @@
           }
         }
       ]
+    },
+    {
+      "name": "withdraw_consignment",
+      "docs": [
+        "Take back consigned items that have not been sold yet."
+      ],
+      "discriminator": [
+        126,
+        79,
+        236,
+        43,
+        149,
+        153,
+        112,
+        71
+      ],
+      "accounts": [
+        {
+          "name": "seller",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "consignment"
+          ]
+        },
+        {
+          "name": "yard",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard.yard_id",
+                "account": "Yard"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "consignment.mint",
+                "account": "Consignment"
+              }
+            ]
+          }
+        },
+        {
+          "name": "consignment",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  115,
+                  105,
+                  103,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "seller"
+              },
+              {
+                "kind": "account",
+                "path": "consignment.mint",
+                "account": "Consignment"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller_item_account",
+          "writable": true
+        },
+        {
+          "name": "warehouse",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  114,
+                  101,
+                  104,
+                  111,
+                  117,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yard"
+              },
+              {
+                "kind": "account",
+                "path": "consignment.mint",
+                "account": "Consignment"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "qty",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -2763,6 +3244,19 @@
       ]
     },
     {
+      "name": "Consignment",
+      "discriminator": [
+        158,
+        104,
+        234,
+        9,
+        1,
+        189,
+        75,
+        228
+      ]
+    },
+    {
       "name": "Listing",
       "discriminator": [
         218,
@@ -2786,6 +3280,19 @@
         101,
         100,
         40
+      ]
+    },
+    {
+      "name": "Pool",
+      "discriminator": [
+        241,
+        154,
+        109,
+        4,
+        17,
+        177,
+        109,
+        188
       ]
     },
     {
@@ -2990,6 +3497,16 @@
       "code": 6034,
       "name": "NotDrawn",
       "msg": "This unit's draw has not arrived yet"
+    },
+    {
+      "code": 6035,
+      "name": "ConsignedFirst",
+      "msg": "Consigned items of this kind are waiting and sell first"
+    },
+    {
+      "code": 6036,
+      "name": "NotEnoughConsigned",
+      "msg": "You don't have that many consigned"
     }
   ],
   "types": [
@@ -3079,6 +3596,49 @@
           {
             "name": "arg",
             "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Consignment",
+      "docs": [
+        "Items one wallet has handed to the yard to be sold inside units. When one of them comes out",
+        "of a unit, its share of the winning bid is paid to the seller by the program."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "yard",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "qty",
+            "docs": [
+              "Still waiting to be sold. Can be taken back at any time."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "sold",
+            "type": "u64"
+          },
+          {
+            "name": "earned",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
@@ -3238,6 +3798,68 @@
                 32
               ]
             }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Pool",
+      "docs": [
+        "One item type's shelf in the yard: how many consigned items are waiting in the warehouse, and",
+        "the price record anyone can read. Auction prices are each lot's share of a winning bid;",
+        "market prices are fixed-price resales."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "yard",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "consigned",
+            "docs": [
+              "Player-owned items waiting in the warehouse. They are sold before the yard's own stock."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "auction_sold",
+            "type": "u64"
+          },
+          {
+            "name": "auction_paid",
+            "docs": [
+              "Bid currency paid for those items, in its smallest unit."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "auction_last",
+            "docs": [
+              "Price of one item in the most recent unit it came out of."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "market_sold",
+            "type": "u64"
+          },
+          {
+            "name": "market_paid",
+            "type": "u64"
+          },
+          {
+            "name": "market_last",
+            "type": "u64"
           },
           {
             "name": "bump",

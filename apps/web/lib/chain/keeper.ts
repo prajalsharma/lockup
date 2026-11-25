@@ -20,7 +20,7 @@ import nacl from "tweetnacl";
 import idl from "./idl.json";
 import {
   BID_MINT, DELEGATION_PROGRAM, ITEMS, PROGRAM, RPC, TEE_RPC, TEE_VALIDATOR, USD, VAULT, VRF_QUEUE, YARD,
-  HOUSE_BUY_SHARE, MULTI_LINE_SECONDS, MULTI_SECONDS, MULTI_WAIT_SECONDS, SOLO_SECONDS, bidPda, bidderPda, manifestPda, stallPda, unitPda, warehousePda,
+  HOUSE_BUY_SHARE, MULTI_LINE_SECONDS, MULTI_SECONDS, MULTI_WAIT_SECONDS, SOLO_SECONDS, bidPda, bidderPda, consignPda, manifestPda, poolPda, stallPda, unitPda, warehousePda,
 } from "./shared";
 
 const TARGET_SOLO = 2; // solo units kept waiting: you against two house bidders
@@ -318,13 +318,22 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
           // Items go out only once the winner's own settlement has gone through.
           const paid = !!winnerRecord?.won || report.did.some((d) => d.startsWith(`settle ${u.winner.toBase58().slice(0, 4)} on unit ${id}`));
           if (paid) {
+            // Read once per unit: which items have players' consignments waiting, and whose.
+            const [pools, waiting] = await Promise.all([readPools(), readConsignments()]);
             for (const [i, lot] of u.lots.entries()) {
               if (u.claimedMask & (1 << i)) continue;
               const mint = yard.catalog[lot.item].mint as PublicKey;
               const ata = getAssociatedTokenAddressSync(mint, u.winner);
+              // Consigned items sell before the yard's own stock. Whoever has sold least goes first.
+              const from = pools[lot.item]?.consigned ? waiting.filter((c) => c.item === lot.item && c.qty > 0).sort((a, b) => a.sold - b.sold)[0] : undefined;
+              const payout = from ? getAssociatedTokenAddressSync(BID_MINT, from.seller) : null;
               await step(`send ${lot.qty}x ${ITEMS[lot.item].name} from unit ${id}`, () => p.methods.claimLot(i)
-                .accountsPartial({ crank: k.keeper.publicKey, yard: YARD, unit: key, bidderRecord: bidderPda(key, u.winner), itemMint: mint, warehouse: warehousePda(mint), winnerTokenAccount: ata, vault: VAULT, treasury, tokenProgram: TOKEN_PROGRAM_ID })
-                .preInstructions([createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, ata, u.winner, mint)]).rpc());
+                .accountsPartial({ crank: k.keeper.publicKey, yard: YARD, unit: key, bidderRecord: bidderPda(key, u.winner), itemMint: mint, warehouse: warehousePda(mint), winnerTokenAccount: ata, vault: VAULT, treasury, pool: poolPda(mint), consignment: from ? from.key : null, sellerPayout: payout, tokenProgram: TOKEN_PROGRAM_ID } as any)
+                .preInstructions([
+                  createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, ata, u.winner, mint),
+                  // The seller may have closed their USDC account; reopen it so they can be paid.
+                  ...(from && payout ? [createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, payout, from.seller, BID_MINT)] : []),
+                ]).rpc());
             }
           }
         }
@@ -353,7 +362,7 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
         const ok = await step(`house buys ${qty} from ${cheap.key.toBase58().slice(0, 6)}`, async () => {
           const ata = getAssociatedTokenAddressSync(cheap.mint, k.keeper.publicKey);
           await p.methods.buyItem(new BN(qty), new BN(cheap.price))
-            .accountsPartial({ buyer: k.keeper.publicKey, yard: YARD, listing: cheap.key, seller: cheap.seller, stall: stallPda(cheap.key), buyerTokenAccount: treasury, sellerTokenAccount: getAssociatedTokenAddressSync(BID_MINT, cheap.seller), buyerItemAccount: ata, tokenProgram: TOKEN_PROGRAM_ID })
+            .accountsPartial({ buyer: k.keeper.publicKey, yard: YARD, listing: cheap.key, seller: cheap.seller, stall: stallPda(cheap.key), buyerTokenAccount: treasury, sellerTokenAccount: getAssociatedTokenAddressSync(BID_MINT, cheap.seller), buyerItemAccount: ata, pool: poolPda(cheap.mint), tokenProgram: TOKEN_PROGRAM_ID })
             .preInstructions([
               createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, ata, k.keeper.publicKey, cheap.mint),
               // The seller may have closed their USDC account; reopen it so they can be paid.
@@ -479,4 +488,38 @@ export async function readListings(): Promise<ListingView[]> {
     out.push({ key: a.pubkey, seller: l.seller, mint: l.mint, item, price: Number(l.price), qty: Number(l.qty), value: (ITEMS[item].value * USD) / 100 });
   }
   return out.sort((a, b) => a.price / a.value - b.price / b.value);
+}
+
+export interface PoolView { item: number; consigned: number; auctionSold: number; auctionPaid: number; auctionLast: number; marketSold: number; marketPaid: number; marketLast: number }
+/** Each item's shelf: consigned stock waiting and the price record, in catalog order. */
+export async function readPools(): Promise<PoolView[]> {
+  const coder = prog(connection, Keypair.generate()).coder.accounts;
+  const infos = await connection.getMultipleAccountsInfo(ITEMS.map((i) => poolPda(new PublicKey(i.mint))));
+  return infos.map((info, item) => {
+    const zero = { item, consigned: 0, auctionSold: 0, auctionPaid: 0, auctionLast: 0, marketSold: 0, marketPaid: 0, marketLast: 0 };
+    if (!info) return zero;
+    try {
+      const d: any = coder.decode("pool", info.data);
+      return { item, consigned: Number(d.consigned), auctionSold: Number(d.auctionSold), auctionPaid: Number(d.auctionPaid), auctionLast: Number(d.auctionLast), marketSold: Number(d.marketSold), marketPaid: Number(d.marketPaid), marketLast: Number(d.marketLast) };
+    } catch { return zero; }
+  });
+}
+
+export interface ConsignView { key: PublicKey; seller: PublicKey; item: number; qty: number; sold: number; earned: number }
+const CONSIGN_SIZE = 129; // 8 discriminator + yard 32 + seller 32 + mint 32 + qty 8 + sold 8 + earned 8 + bump 1
+/** Players' consignments in this yard, optionally one seller's. */
+export async function readConsignments(seller?: PublicKey): Promise<ConsignView[]> {
+  const coder = prog(connection, Keypair.generate()).coder.accounts;
+  const filters = [{ dataSize: CONSIGN_SIZE }, { memcmp: { offset: 8, bytes: YARD.toBase58() } }, ...(seller ? [{ memcmp: { offset: 40, bytes: seller.toBase58() } }] : [])];
+  const found = await connection.getProgramAccounts(PROGRAM, { filters });
+  const out: ConsignView[] = [];
+  for (const a of found) {
+    let c: any;
+    // A pool is the same size; its discriminator makes the decode fail, which skips it.
+    try { c = coder.decode("consignment", a.account.data); } catch { continue; }
+    const item = ITEMS.findIndex((i) => i.mint === c.mint.toBase58());
+    if (item < 0) continue;
+    out.push({ key: a.pubkey, seller: c.seller, item, qty: Number(c.qty), sold: Number(c.sold), earned: Number(c.earned) });
+  }
+  return out;
 }

@@ -10,6 +10,8 @@ import { HOUSE_BUY_SHARE, ITEMS } from "@/lib/chain/shared";
 import { badges, standing } from "@/lib/rank";
 import { ItemArt, ItemTag } from "./item-art";
 import { useMarket } from "./market";
+import { usePrices } from "./prices";
+import { Journey } from "./journey";
 
 export function HaulView() {
   const p = usePlayer();
@@ -19,6 +21,7 @@ export function HaulView() {
   const [price, setPrice] = useState(0);
   const [tick, setTick] = useState(0);
   const market = useMarket();
+  const prices = usePrices();
 
   useEffect(() => {
     setData(null); setFailed(false);
@@ -53,6 +56,7 @@ export function HaulView() {
   const found = new Set<string>([...wins.flatMap((r) => r.lots.map((l) => l.id)), ...data.items.map((i) => i.id)]);
   const holding = new Map(data.items.map((i) => [i.id, i.qty]));
   const mine = (market.listings ?? []).filter((l) => l.seller === p.address);
+  const inYard = data.consigned.filter((c) => c.qty > 0 || c.sold > 0);
   const done = (ok: boolean) => { if (ok) { setSelling(null); setTimeout(() => { setTick((t) => t + 1); void market.read(); }, 1500); } };
 
   return (
@@ -110,6 +114,7 @@ export function HaulView() {
               const each = i.value / i.qty;
               const quick = Math.max(0.01, Math.floor(each * HOUSE_BUY_SHARE * 100) / 100);
               const listed = mine.some((l) => l.mint === i.mint);
+              const rec = prices?.find((r) => r.id === i.id);
               return (
                 <li key={i.id} className="grid gap-x-8 gap-y-3 border-b border-line py-4 md:grid-cols-[1fr_auto] md:items-center">
                   <div className="flex items-center gap-4">
@@ -131,9 +136,18 @@ export function HaulView() {
                     </form>
                   ) : (
                     <div className="flex flex-wrap gap-2">
-                      <button type="button" className="btn btn-ghost btn-sm" disabled={!!p.busy} onClick={() => { setPrice(Number(each.toFixed(2))); setSelling(i.mint); }}>Set a price</button>
+                      <button type="button" className="btn btn-ghost btn-sm" disabled={!!p.busy} onClick={() => { setPrice(Number((rec?.marketLast ?? each).toFixed(2))); setSelling(i.mint); }}>Set a price</button>
                       <button type="button" className="btn btn-ghost btn-sm" disabled={!!p.busy} onClick={() => void p.sell(i.mint, quick, 1).then(done)}>Sell one to the yard for {usd(quick)}</button>
+                      <button type="button" className="btn btn-primary btn-sm" disabled={!!p.busy} onClick={() => void p.consign(i.mint, 1).then(done)}>Put one in a unit</button>
                     </div>
+                  )}
+                  {/* What each route has actually paid, so the choice is made on numbers. */}
+                  {!listed && selling !== i.mint && (
+                    <p className="label num text-ink-3 md:col-span-2 md:pl-[60px]">
+                      {rec?.marketLast != null ? `Market: last sold ${usd(rec.marketLast)}` : "Market: no sales yet"}
+                      {" · "}Yard: {usd(quick)} now{" · "}
+                      {rec?.auctionAvg != null ? <span className="text-ink">In a unit: {usd(rec.auctionAvg)} on average over {rec.auctionSold} sold</span> : "In a unit: a share of the winning bid"}
+                    </p>
                   )}
                 </li>
               );
@@ -141,8 +155,33 @@ export function HaulView() {
           </ul>
         )}
         {p.error && <p role="alert" className="mt-4 text-bad">{p.error}</p>}
-        {data.items.length > 0 && <p className="mt-4 max-w-[620px] text-sm text-ink-2">Keep an item or sell it. Set your own price and it goes on the <Link href="/market" className="ulink ulink-on">market</Link>. The yard buys anything priced at half its appraisal or less, usually within a minute.</p>}
+        {data.items.length > 0 && <p className="mt-4 max-w-[680px] text-sm text-ink-2">Three ways to sell. <span className="text-ink">Set a price</span> and it goes on the <Link href="/market" className="ulink ulink-on">market</Link>. <span className="text-ink">Sell to the yard</span> for half its appraisal, usually within a minute. Or <span className="text-ink">put it in a unit</span>: it joins the stock that units are filled from, and when it comes out of one you are paid its share of the winning bid.</p>}
       </section>
+
+      {inYard.length > 0 && (
+        <section className="mt-14" aria-labelledby="consigned">
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 id="consigned" className="display text-[clamp(36px,4vw,56px)]">In the yard</h2>
+            <p className="label num text-ink-3">Earned so far <span className="text-ink">{usd(inYard.reduce((s, c) => s + c.earned, 0))}</span></p>
+          </div>
+          <ul className="mt-4 border-t border-line">
+            {inYard.map((c) => (
+              <li key={c.mint} className="grid gap-x-8 gap-y-3 border-b border-line py-4 md:grid-cols-[1fr_auto] md:items-center">
+                <div className="flex items-center gap-4">
+                  <ItemArt id={c.id} className={`h-11 w-11 shrink-0 ${c.rarity === 2 ? "text-accent-text" : "text-ink-2"}`} />
+                  <div>
+                    <p className={`text-[17px] font-semibold ${c.rarity === 2 ? "text-accent-text" : ""}`}>{c.name}</p>
+                    <p className="label num mt-1 text-ink-3">{c.qty} waiting · {c.sold} sold{c.sold > 0 ? ` for ${usd(c.earned)}` : ""} · appraised {usd(c.value)}</p>
+                  </div>
+                </div>
+                {c.qty > 0 && <button type="button" className="btn btn-ghost btn-sm" disabled={!!p.busy} onClick={() => void p.takeBack(c.mint, 1).then(done)}>{p.busy ?? "Take one back"}</button>}
+              </li>
+            ))}
+          </ul>
+          <Journey at={inYard.some((c) => c.sold > 0) ? 4 : 1} className="mt-8" />
+          <p className="mt-6 max-w-[680px] text-sm text-ink-2">Neither you nor the yard knows which unit an item will land in. Players' items are sold before the yard's own stock, and you can take back anything that hasn't sold.</p>
+        </section>
+      )}
 
       {mine.length > 0 && (
         <section className="mt-14" aria-labelledby="forsale">

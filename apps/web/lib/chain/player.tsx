@@ -14,7 +14,7 @@ import nacl from "tweetnacl";
 import dynamic from "next/dynamic";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { EmailWalletCtx, PRIVY_APP_ID, type EmailWallet } from "./email-wallet";
-import { BID_MINT, RPC, TEE_RPC, USD, VAULT, YARD, bidPda, bidderPda, listingPda, sleep, stallPda, unitPda } from "./shared";
+import { BID_MINT, RPC, TEE_RPC, USD, VAULT, YARD, bidPda, bidderPda, consignPda, listingPda, poolPda, sleep, stallPda, unitPda, warehousePda } from "./shared";
 
 interface Signer {
   kind: "quick" | "extension" | "email";
@@ -73,6 +73,10 @@ interface PlayerState {
   sell(mint: string, price: number, qty: number): Promise<boolean>;
   /** Take a listing down and get the items back. */
   unlist(mint: string): Promise<boolean>;
+  /** Hand items to the yard to be sold inside units. You are paid their share of the winning bid. */
+  consign(mint: string, qty: number): Promise<boolean>;
+  /** Take back consigned items that have not sold yet. */
+  takeBack(mint: string, qty: number): Promise<boolean>;
   /** Buy one item from a listing. */
   buy(l: { seller: string; mint: string; price: number }): Promise<boolean>;
   refresh(): void;
@@ -304,7 +308,27 @@ function Inner({ children }: { children: React.ReactNode }) {
     const tx = new Transaction().add(
       createAssociatedTokenAccountIdempotentInstruction(s.publicKey, itemAta, s.publicKey, mint),
       await program(connection, s.publicKey).methods.buyItem(new BN(1), new BN(Math.round(l.price * USD)))
-        .accountsPartial({ buyer: s.publicKey, yard: YARD, listing, seller, stall: stallPda(listing), buyerTokenAccount: getAssociatedTokenAddressSync(BID_MINT, s.publicKey), sellerTokenAccount: getAssociatedTokenAddressSync(BID_MINT, seller), buyerItemAccount: itemAta, tokenProgram: TOKEN_PROGRAM_ID }).instruction(),
+        .accountsPartial({ buyer: s.publicKey, yard: YARD, listing, seller, stall: stallPda(listing), buyerTokenAccount: getAssociatedTokenAddressSync(BID_MINT, s.publicKey), sellerTokenAccount: getAssociatedTokenAddressSync(BID_MINT, seller), buyerItemAccount: itemAta, pool: poolPda(mint), tokenProgram: TOKEN_PROGRAM_ID }).instruction(),
+    );
+    await send(s, tx, connection);
+  }), [run, connection, send]);
+
+  const consign = useCallback((mintStr: string, qty: number) => run("Handing it to the yard", async (s) => {
+    const { BN, program } = await chainKit();
+    const mint = new PublicKey(mintStr);
+    const tx = new Transaction().add(await program(connection, s.publicKey).methods.consign(new BN(qty))
+      .accountsPartial({ seller: s.publicKey, yard: YARD, itemMint: mint, pool: poolPda(mint), consignment: consignPda(s.publicKey, mint), sellerItemAccount: getAssociatedTokenAddressSync(mint, s.publicKey), warehouse: warehousePda(mint), tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId }).instruction());
+    await send(s, tx, connection);
+  }), [run, connection, send]);
+
+  const takeBack = useCallback((mintStr: string, qty: number) => run("Taking it back", async (s) => {
+    const { BN, program } = await chainKit();
+    const mint = new PublicKey(mintStr);
+    const ata = getAssociatedTokenAddressSync(mint, s.publicKey);
+    const tx = new Transaction().add(
+      createAssociatedTokenAccountIdempotentInstruction(s.publicKey, ata, s.publicKey, mint),
+      await program(connection, s.publicKey).methods.withdrawConsignment(new BN(qty))
+        .accountsPartial({ seller: s.publicKey, yard: YARD, pool: poolPda(mint), consignment: consignPda(s.publicKey, mint), sellerItemAccount: ata, warehouse: warehousePda(mint), tokenProgram: TOKEN_PROGRAM_ID }).instruction(),
     );
     await send(s, tx, connection);
   }), [run, connection, send]);
@@ -356,7 +380,7 @@ function Inner({ children }: { children: React.ReactNode }) {
       if (mode === "email") void email?.logout().catch(() => undefined);
       remember(null);
     },
-    join, bid, topUp, sell, unlist, buy,
+    join, bid, topUp, sell, unlist, buy, consign, takeBack,
     refresh: () => { if (signer) void refreshFor(signer.publicKey); },
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

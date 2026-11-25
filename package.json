@@ -12,6 +12,7 @@
     "setup:devnet": "tsx scripts/setup.ts",
     "round": "tsx scripts/round.ts",
     "market": "tsx scripts/market.ts",
+    "consign": "tsx scripts/consign.ts",
     "attack": "tsx scripts/attack.ts"
   },
   "packageManager": "pnpm@11.20.0",

@@ -52,6 +52,20 @@ export interface Haul {
   dollars: number;
   items: { name: string; id: string; rarity: number; qty: number; value: number; mint: string }[];
   rounds: HaulRound[];
+  /** Items this wallet has handed to the yard to be sold inside units. */
+  consigned: Consigned[];
+}
+export interface Consigned { mint: string; id: string; name: string; rarity: number; value: number; qty: number; sold: number; earned: number }
+
+/** One item's price record, read from its shelf account. Prices are per item; null until a first sale. */
+export interface PriceRecord {
+  id: string; name: string; rarity: number; mint: string;
+  /** The yard's own appraisal. */
+  value: number;
+  /** Players' items waiting in the warehouse. */
+  consigned: number;
+  auctionSold: number; auctionAvg: number | null; auctionLast: number | null;
+  marketSold: number; marketAvg: number | null; marketLast: number | null;
 }
 
 /** One open resale listing, read from Solana. Prices are per item. */
