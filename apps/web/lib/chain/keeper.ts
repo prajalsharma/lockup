@@ -20,7 +20,7 @@ import nacl from "tweetnacl";
 import idl from "./idl.json";
 import {
   BID_MINT, DELEGATION_PROGRAM, ITEMS, PROGRAM, RPC, TEE_RPC, TEE_VALIDATOR, USD, VAULT, VRF_QUEUE, YARD,
-  HOUSE_BUY_SHARE, MULTI_LINE_SECONDS, MULTI_SECONDS, MULTI_WAIT_SECONDS, SOLO_SECONDS, bidPda, bidderPda, consignPda, manifestPda, poolPda, stallPda, unitPda, warehousePda,
+  HOUSE_BUY_SHARE, MULTI_LINE_SECONDS, MULTI_SECONDS, MULTI_WAIT_SECONDS, SOLO_SECONDS, bidPda, bidderPda, consignPda, manifestPda, poolPda, pulseOf, seatOf, stallPda, tellOf, unitPda, warehousePda,
 } from "./shared";
 
 const TARGET_SOLO = 2; // solo units kept waiting: you against two house bidders
@@ -110,7 +110,7 @@ export async function readUnits(k: Keeper | null, limit = WINDOW): Promise<{ yar
     try {
       if (onRollup && k) {
         teeProg ??= prog(await tee(k.keeper), k.keeper);
-        u = await (teeProg.account as any).unit.fetch(keys[i]);
+        u = await (teeProg.account as any).unit.fetch(keys[i], "processed");
       } else {
         u = p.coder.accounts.decode("unit", info.data);
       }
@@ -122,24 +122,13 @@ export async function readUnits(k: Keeper | null, limit = WINDOW): Promise<{ yar
   return { yard, units };
 }
 
-/**
- * What the table may see of a bidder while bids are sealed. The program keeps it in the slot's
- * `bid` field until the unit closes: raises in the low 16 bits, locked in bit 16, and the second
- * of the last action (counted from the start of the bidding clock) in the high 32 bits.
- */
-export function tellOf(bid: any): { raises: number; locked: boolean; lastAt: number } {
-  return { raises: bid.maskn(16).toNumber(), locked: bid.testn(16), lastAt: bid.shrn(32).toNumber() };
-}
-/** A slot as the site shows it while bids are sealed: never an amount. */
-export function seatOf(u: any, s: any): { raises: number; locked: boolean; lastAt: number | null } {
-  const t = "bidding" in u.status && s.hasBid ? tellOf(s.bid) : null;
-  return { raises: t?.raises ?? 0, locked: !!t?.locked, lastAt: t ? (Number(u.closesAt) - Number(u.duration) + t.lastAt) * 1000 : null };
-}
+export { pulseOf, seatOf, tellOf };
 /** One unit, from the private rollup when it can be read there, otherwise from Solana. */
 export async function readUnit(k: Keeper | null, id: number): Promise<any | null> {
   const key = unitPda(id);
   if (k) {
-    try { return await (prog(await tee(k.keeper), k.keeper).account as any).unit.fetch(key); } catch { /* not on the rollup */ }
+    // "processed": the rollup's newest state. Waiting for "confirmed" here lags moves by seconds.
+    try { return await (prog(await tee(k.keeper), k.keeper).account as any).unit.fetch(key, "processed"); } catch { /* not on the rollup */ }
   }
   const info = await connection.getAccountInfo(key);
   if (!info) return null;

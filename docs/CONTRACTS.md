@@ -40,6 +40,11 @@ Pins: `anchor-lang 1.0.2`, `ephemeral-rollups-sdk 0.16.2` (features `anchor`, `a
 The door does not wait for the clock when it has no reason to: `close_unit` is allowed once every
 bidder in the locked line has bid and locked in, or when the clock runs out, whichever comes first.
 
+The unit page shows the table live. A wallet that has bid is logged in to the rollup and subscribes to the
+unit account over the rollup's websocket, so each move arrives as it lands; visitors without a rollup
+login get the same public fields from `/api/pulse/[id]` about three times a second. Neither path can
+carry an amount, because the unit account does not hold one until it closes.
+
 House bidders follow one published rule, run by the keeper: open at 70% of the limit the three clues
 suggest, raise once to that limit after a player has bid, and lock in when every player has or with
 12 seconds left.

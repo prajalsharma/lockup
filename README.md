@@ -7,8 +7,10 @@ the winner keeps the haul or sells it piece by piece.
 
 Bids and contents stay sealed inside MagicBlock's Private Ephemeral Rollup until every bid is in or the clock runs out,
 and MagicBlock VRF decides what each unit holds. After the result commits, MagicBlock pays every bidder on
-Solana by Magic Action, about 6 seconds after the commit is sent. A sealed bid confirms on the rollup in about 0.6
-seconds (eight bids, 555 to 637 ms, timed from a laptop with the network round trip included).
+Solana by Magic Action, about 6 seconds after the commit is sent. A sealed bid, a raise or a lock-in confirms on the rollup in about half a second
+(medians of 380 to 700 ms across live rounds, timed in the browser from sending to confirmed, network round trip
+included), and the unit page shows the figure for your own moves. Another player's move is pushed to your screen
+over the rollup's websocket: 0.8 to 2.3 seconds from their click in a two-browser test.
 
 - **Play:** https://lockup-seven.vercel.app
 - **Program (devnet):** [`2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR`](https://explorer.solana.com/address/2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR?cluster=devnet)

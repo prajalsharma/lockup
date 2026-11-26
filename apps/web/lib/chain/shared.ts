@@ -43,3 +43,25 @@ export const MULTI_WAIT_SECONDS = 120;
 export const MULTI_LINE_SECONDS = 25;
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * What the table may see of a bidder while bids are sealed. The program keeps it in the slot's
+ * `bid` field until the unit closes: raises in the low 16 bits, locked in bit 16, and the second
+ * of the last action (counted from the start of the bidding clock) in the high 32 bits.
+ */
+export function tellOf(bid: any): { raises: number; locked: boolean; lastAt: number } {
+  return { raises: bid.maskn(16).toNumber(), locked: bid.testn(16), lastAt: bid.shrn(32).toNumber() };
+}
+/** A slot as the site shows it while bids are sealed: never an amount. */
+export function seatOf(u: any, s: any): { raises: number; locked: boolean; lastAt: number | null } {
+  const t = "bidding" in u.status && s.hasBid ? tellOf(s.bid) : null;
+  return { raises: t?.raises ?? 0, locked: !!t?.locked, lastAt: t ? (Number(u.closesAt) - Number(u.duration) + t.lastAt) * 1000 : null };
+}
+/** A decoded unit account as the table the unit page shows. */
+export function pulseOf(u: any) {
+  return {
+    status: Object.keys(u.status)[0] as "created" | "open" | "bidding" | "closed", stocked: u.stocked as boolean, closesAt: Number(u.closesAt) * 1000, bidCount: u.bidCount as number,
+    bids: u.slots.map((sl: any) => ({ who: sl.bidder.toBase58() as string, hasBid: sl.hasBid as boolean, ...seatOf(u, sl) })),
+    readAt: Date.now(),
+  };
+}

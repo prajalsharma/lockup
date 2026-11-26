@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { loadKeeper, readUnit, seatOf } from "@/lib/chain/keeper";
-import type { ChainUnit, Pulse } from "@/lib/chain/types";
+import { loadKeeper, readUnit } from "@/lib/chain/keeper";
+import { pulseOf } from "@/lib/chain/shared";
+import type { Pulse } from "@/lib/chain/types";
 
 export const dynamic = "force-dynamic";
 
@@ -15,15 +16,11 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   const id = Number((await params).id);
   if (!Number.isInteger(id) || id < 1 || id > 1_000_000) return NextResponse.json({ error: "No such unit" }, { status: 400 });
   const hit = cache.get(id);
-  if (hit && Date.now() - hit.at < 300) return NextResponse.json(hit.body);
+  if (hit && Date.now() - hit.at < 200) return NextResponse.json(hit.body);
   try {
     const u = await readUnit(loadKeeper(), id);
     if (!u) return NextResponse.json({ error: "No such unit" }, { status: 404 });
-    const body: Pulse = {
-      status: Object.keys(u.status)[0] as ChainUnit["status"], stocked: u.stocked, closesAt: Number(u.closesAt) * 1000, bidCount: u.bidCount,
-      bids: u.slots.map((s: any) => ({ who: s.bidder.toBase58(), hasBid: s.hasBid, ...seatOf(u, s) })),
-      readAt: Date.now(),
-    };
+    const body: Pulse = pulseOf(u);
     cache.set(id, { at: Date.now(), body });
     if (cache.size > 200) cache.delete(cache.keys().next().value as number);
     return NextResponse.json(body);

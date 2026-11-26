@@ -18,7 +18,7 @@ import {
   CATALOG, RPC, TEE_VALIDATOR, USD, VRF_QUEUE, cachedKeypair, consignedFor, loadIdl, loadKeypair, pdas, programFor, sleep, teeConnection, tx,
 } from "./lib";
 
-const DURATION = Number(process.env.DURATION ?? 45);
+const DURATION = Number(process.env.DURATION ?? 85); // long enough for the privacy reads and the raise checks before the clock runs out
 const CENT = USD / 100n;
 const MIN_BID = 10n * CENT;
 const PLAN = [

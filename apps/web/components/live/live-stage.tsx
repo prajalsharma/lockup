@@ -27,8 +27,15 @@ function tellText(b: ChainUnit["bids"][number], now: number) {
   return b.raises ? `raised ${b.raises}×${when}` : `bid sealed${when}`;
 }
 
-/** The unit's table from the private rollup, twice a second while bids are sealed. */
-function usePulse(id: number, on: boolean) {
+/**
+ * The unit's table from the private rollup while bids are sealed. A wallet that is logged in to
+ * the rollup is pushed every change over its websocket, with a slow read as a safety net.
+ * Everyone else asks the site about three times a second.
+ */
+function usePulse(id: number, on: boolean, p: { table(id: number): Promise<Pulse | null>; watch(id: number, on: (p: Pulse) => void): (() => void) | null; linked: boolean }) {
+  const own = useRef(p);
+  own.current = p;
+  const linked = p.linked;
   const [pulse, setPulse] = useState<Pulse | null>(null);
   useEffect(() => {
     if (!on) { setPulse(null); return; }
@@ -37,13 +44,18 @@ function usePulse(id: number, on: boolean) {
     const read = async () => {
       if (busy || document.visibilityState !== "visible") return;
       busy = true;
-      try { const r = await fetch(`/api/pulse/${id}`); if (r.ok && live) setPulse(await r.json()); } catch { /* next read */ }
+      try {
+        let next = await own.current.table(id);
+        if (!next) { const r = await fetch(`/api/pulse/${id}`); if (r.ok) next = await r.json(); }
+        if (next && live) setPulse(next);
+      } catch { /* next read */ }
       busy = false;
     };
     void read();
-    const t = setInterval(read, 500);
-    return () => { live = false; clearInterval(t); };
-  }, [id, on]);
+    const stop = linked ? own.current.watch(id, (next) => { if (live) setPulse((was) => (was && was.readAt > next.readAt ? was : next)); }) : null;
+    const t = setInterval(read, stop ? 1500 : 300);
+    return () => { live = false; clearInterval(t); stop?.(); };
+  }, [id, on, linked]);
   return pulse;
 }
 
@@ -116,17 +128,22 @@ function Step({ title, children }: { title: string; children: React.ReactNode })
 }
 
 export function LiveStage({ unitId }: { unitId: number }) {
-  const { data, failed } = useChainYard(3000);
+  // Once the door is about to open, ask for the result more often.
+  const [soon, setSoon] = useState(false);
+  const { data, failed } = useChainYard(soon ? 1200 : 3000);
   const p = usePlayer();
   const now = useNow();
   const reduced = useReducedMotion();
   const base = data?.units.find((u) => u.id === unitId);
-  // While bids are sealed, the table comes from the rollup twice a second instead of every three.
-  const pulse = usePulse(unitId, base?.status === "bidding" && base.onRollup);
+  // While bids are sealed, the table comes from the rollup about three times a second.
+  const pulse = usePulse(unitId, base?.status === "bidding" && base.onRollup, p);
   const unit = useMemo(() => {
     if (!base || !pulse || base.status !== "bidding" || pulse.status !== "bidding") return base;
     return { ...base, stocked: pulse.stocked, closesAt: pulse.closesAt, bidCount: pulse.bidCount, bids: base.bids.map((b) => ({ ...b, ...(pulse.bids.find((x) => x.who === b.who) ?? {}) })) };
   }, [base, pulse]);
+  // Also once this player has locked in: the keeper is nudged by these reads, so the house answers sooner.
+  const due = !!unit && unit.status === "bidding" && (unit.bids.some((b) => b.who === p.address && b.locked) || (unit.bids.length > 0 && unit.bids.every((b) => b.hasBid && b.locked)) || (unit.stocked && unit.closesAt - now <= 0));
+  useEffect(() => setSoon(due), [due]);
   const [found, setFound] = useState([false, false, false]);
   const [deposit, setDeposit] = useState(1);
   // Moves made on this page: how long each took from sending to confirmed on the private rollup.

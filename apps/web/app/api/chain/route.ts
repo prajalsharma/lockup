@@ -18,7 +18,8 @@ export async function GET() {
     const { yard, units: all } = await readUnits(k);
     // Every unit still in play, plus the newest finished ones.
     const live = all.filter((x) => !("closed" in x.u.status));
-    const units = [...live, ...all.filter((x) => "closed" in x.u.status).slice(0, Math.max(6, 14 - live.length))].sort((a, b) => b.id - a.id);
+    const closedUnits = all.filter((x) => "closed" in x.u.status).sort((a, b) => Number(b.u.closesAt) - Number(a.u.closesAt));
+    const units = [...live, ...closedUnits.slice(0, Math.max(8, 14 - live.length))].sort((a, b) => b.id - a.id);
     const house = new Set(k ? k.house.map((h) => h.publicKey.toBase58()) : []);
     const out: ChainUnit[] = units.map(({ id, key, onRollup, u }) => {
       const status = Object.keys(u.status)[0] as ChainUnit["status"];

@@ -14,7 +14,8 @@ import nacl from "tweetnacl";
 import dynamic from "next/dynamic";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { EmailWalletCtx, PRIVY_APP_ID, type EmailWallet } from "./email-wallet";
-import { BID_MINT, RPC, TEE_RPC, USD, VAULT, YARD, bidPda, bidderPda, consignPda, listingPda, poolPda, sleep, stallPda, unitPda, warehousePda } from "./shared";
+import type { Pulse } from "./types";
+import { BID_MINT, RPC, TEE_RPC, USD, VAULT, YARD, bidPda, bidderPda, consignPda, listingPda, poolPda, pulseOf, sleep, stallPda, unitPda, warehousePda } from "./shared";
 
 interface Signer {
   kind: "quick" | "extension" | "email";
@@ -74,6 +75,12 @@ interface PlayerState {
   raise(unitId: number, amount: number): Promise<boolean>;
   /** Lock in: no more raises. The door opens once everyone has. */
   lockIn(unitId: number): Promise<boolean>;
+  /** The unit's table read straight from the private rollup over this wallet's own connection. Null until the wallet has one. */
+  table(unitId: number): Promise<Pulse | null>;
+  /** Push updates for a unit from the rollup's websocket. Null until this wallet has a rollup connection. */
+  watch(unitId: number, on: (p: Pulse) => void): (() => void) | null;
+  /** True once this wallet is logged in to the private rollup. */
+  linked: boolean;
   topUp(): Promise<boolean>;
   /** Put items up for sale at a price each. */
   sell(mint: string, price: number, qty: number): Promise<boolean>;
@@ -132,6 +139,8 @@ function Inner({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [myBids, setMyBids] = useState<Record<number, number>>({});
   const [moves, setMoves] = useState<number[]>([]);
+  // The wallet that currently holds a logged-in connection to the private rollup, if any.
+  const [linked, setLinked] = useState<string | null>(null);
   const connection = useMemo(() => new Connection(RPC, "confirmed"), []);
   const teeConn = useRef<{ who: string; conn: Connection } | null>(null);
 
@@ -279,7 +288,8 @@ function Inner({ children }: { children: React.ReactNode }) {
     if (teeConn.current?.who !== key) {
       // One signed message proves to the rollup who is asking. It is not a transaction.
       const auth = await mb.getAuthToken(TEE_RPC, s.publicKey, (m: Uint8Array) => s.signMessage(m));
-      teeConn.current = { who: key, conn: new Connection(`${TEE_RPC}?token=${auth.token}`, { commitment: "confirmed" }) };
+      teeConn.current = { who: key, conn: new Connection(`${TEE_RPC}?token=${auth.token}`, { commitment: "confirmed", wsEndpoint: `${TEE_RPC.replace(/^http/, "ws")}?token=${auth.token}` }) };
+      setLinked(key);
     }
     return teeConn.current!.conn;
   }, []);
@@ -288,6 +298,27 @@ function Inner({ children }: { children: React.ReactNode }) {
     try { sessionStorage.setItem("lockup.my-bids", JSON.stringify(n)); } catch { /* ignore */ }
     return n;
   }), []);
+
+  const table = useCallback(async (unitId: number): Promise<Pulse | null> => {
+    const c = teeConn.current;
+    if (!c || c.who !== who) return null;
+    const { program } = await chainKit();
+    try { return pulseOf(await (program(c.conn, new PublicKey(c.who)).account as any).unit.fetch(unitPda(unitId), "processed")); } catch { return null; }
+  }, [who]);
+
+  /** Be told the moment the unit changes on the rollup, over its websocket. Returns a way to stop, or null with no rollup connection. */
+  const watch = useCallback((unitId: number, on: (p: Pulse) => void): (() => void) | null => {
+    const c = teeConn.current;
+    if (!c || c.who !== who) return null;
+    let off = false;
+    let sub: number | null = null;
+    void chainKit().then(({ program }) => {
+      if (off) return;
+      const coder = program(c.conn, new PublicKey(c.who)).coder.accounts;
+      sub = c.conn.onAccountChange(unitPda(unitId), (info) => { try { on(pulseOf(coder.decode("unit", info.data))); } catch { /* not a unit yet */ } }, "processed");
+    });
+    return () => { off = true; if (sub !== null) void c.conn.removeAccountChangeListener(sub).catch(() => undefined); };
+  }, [who]);
 
   const raise = useCallback((unitId: number, amount: number) => run("Raising your bid", async (s) => {
     const { BN, program, mb } = await chainKit();
@@ -424,7 +455,7 @@ function Inner({ children }: { children: React.ReactNode }) {
       if (mode === "email") void email?.logout().catch(() => undefined);
       remember(null);
     },
-    join, bid, raise, lockIn, topUp, sell, unlist, buy, consign, takeBack,
+    join, bid, raise, lockIn, table, watch, linked: !!who && linked === who, topUp, sell, unlist, buy, consign, takeBack,
     refresh: () => { if (signer) void refreshFor(signer.publicKey); },
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
