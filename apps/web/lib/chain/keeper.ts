@@ -269,7 +269,9 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
           });
           continue;
         }
-        if (now < Number(u.closesAt)) {
+        // The program opens the door as soon as everyone in line has bid, so nobody waits out the clock.
+        const everyoneBid = u.slots.length > 0 && u.slots.every((s: any) => s.hasBid);
+        if (now < Number(u.closesAt) && !everyoneBid) {
           for (const [n, h] of k.house.entries()) {
             const slot = u.slots.find((s: any) => s.bidder.equals(h.publicKey));
             if (!slot || slot.hasBid) continue;
@@ -282,7 +284,7 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
           }
           continue;
         }
-        if (now >= Number(u.closesAt) + 1) {
+        if (everyoneBid || now >= Number(u.closesAt) + 1) {
           const bids = u.slots.filter((s: any) => s.hasBid).map((s: any) => bidPda(key, s.bidder));
           const ok = await step(`close unit ${id}`, () => tp.methods.closeUnit().accountsPartial({ authority: k.keeper.publicKey, unit: key })
             .remainingAccounts([manifest, ...bids].map((pubkey) => ({ pubkey, isSigner: false, isWritable: false }))).rpc());
@@ -325,14 +327,28 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
               const mint = yard.catalog[lot.item].mint as PublicKey;
               const ata = getAssociatedTokenAddressSync(mint, u.winner);
               // Consigned items sell before the yard's own stock. Whoever has sold least goes first.
-              const from = pools[lot.item]?.consigned ? waiting.filter((c) => c.item === lot.item && c.qty > 0).sort((a, b) => a.sold - b.sold)[0] : undefined;
+              // The program wants the lot covered by players' items as far as they go, so take as many as it needs.
+              const picked: ConsignView[] = [];
+              if (pools[lot.item]?.consigned) {
+                let need = Math.min(lot.qty, pools[lot.item].consigned);
+                for (const c of waiting.filter((c) => c.item === lot.item && c.qty > 0).sort((a, b) => a.sold - b.sold)) {
+                  if (need <= 0) break;
+                  picked.push(c); need -= c.qty; c.qty = Math.max(0, -need);
+                }
+              }
+              const from = picked[0];
               const payout = from ? getAssociatedTokenAddressSync(BID_MINT, from.seller) : null;
+              const more = picked.slice(1).sort((a, b) => Buffer.compare(a.key.toBuffer(), b.key.toBuffer()));
               await step(`send ${lot.qty}x ${ITEMS[lot.item].name} from unit ${id}`, () => p.methods.claimLot(i)
                 .accountsPartial({ crank: k.keeper.publicKey, yard: YARD, unit: key, bidderRecord: bidderPda(key, u.winner), itemMint: mint, warehouse: warehousePda(mint), winnerTokenAccount: ata, vault: VAULT, treasury, pool: poolPda(mint), consignment: from ? from.key : null, sellerPayout: payout, tokenProgram: TOKEN_PROGRAM_ID } as any)
+                .remainingAccounts(more.flatMap((c) => [
+                  { pubkey: c.key, isSigner: false, isWritable: true },
+                  { pubkey: getAssociatedTokenAddressSync(BID_MINT, c.seller), isSigner: false, isWritable: true },
+                ]))
                 .preInstructions([
                   createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, ata, u.winner, mint),
-                  // The seller may have closed their USDC account; reopen it so they can be paid.
-                  ...(from && payout ? [createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, payout, from.seller, BID_MINT)] : []),
+                  // A seller may have closed their USDC account; reopen it so they can be paid.
+                  ...picked.map((c) => createAssociatedTokenAccountIdempotentInstruction(k.keeper.publicKey, getAssociatedTokenAddressSync(BID_MINT, c.seller), c.seller, BID_MINT)),
                 ]).rpc());
             }
           }

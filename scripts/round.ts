@@ -297,14 +297,22 @@ async function main() {
       const sellerAta = c.seller ? await retry(() => getOrCreateAssociatedTokenAccount(connection, operator, bidMint, c.seller!)) : null;
       const sellerBefore = sellerAta ? BigInt(sellerAta.amount.toString()) : 0n;
       const houseBefore = await treasuryAt();
+      const extra = c.consignment && c.sellerPayout ? [{ pubkey: c.consignment, isSigner: false, isWritable: true }, { pubkey: c.sellerPayout, isSigner: false, isWritable: true }] : [];
       if (c.consignment && !guarded) {
         guarded = true;
         const claim = (over: object) => program.methods.claimLot(i).accountsPartial({ crank: operator.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, winner), itemMint: mint, warehouse: p.warehouse(mint), winnerTokenAccount: ata.address, vault: p.vault, treasury, pool: c.pool, consignment: c.consignment, sellerPayout: c.sellerPayout, tokenProgram: TOKEN_PROGRAM_ID, ...over } as any).simulate();
         const refusedWith = async (over: object, want: RegExp) => { try { await claim(over); console.log("      NOT refused"); return false; } catch (e) { const text = JSON.stringify((e as any)?.simulationResponse ?? "") + String(e); if (!want.test(text)) console.log("      got:", text.slice(0, 600)); return want.test(text); } };
         record("the operator cannot skip a waiting consignment and keep the sale", await refusedWith({ consignment: null, sellerPayout: null }, /ConsignedFirst/));
         record("a consigned item's share cannot be paid to anyone but its seller", await refusedWith({ sellerPayout: getAssociatedTokenAddressSync(bidMint, winner) }, /Unauthorized/));
+        // The same consignment named and listed again would be counted twice.
+        const twice = async () => { try { await program.methods.claimLot(i).accountsPartial({ crank: operator.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, winner), itemMint: mint, warehouse: p.warehouse(mint), winnerTokenAccount: ata.address, vault: p.vault, treasury, pool: c.pool, consignment: c.consignment, sellerPayout: c.sellerPayout, tokenProgram: TOKEN_PROGRAM_ID } as any).remainingAccounts(extra).simulate(); return false; } catch (e) { return /InvalidAccount/.test(JSON.stringify((e as any)?.simulationResponse ?? "") + String(e)); } };
+        record("one consignment cannot be counted twice in a claim", await twice());
       }
-      await retry(() => program.methods.claimLot(i).accountsPartial({ crank: operator.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, winner), itemMint: mint, warehouse: p.warehouse(mint), winnerTokenAccount: ata.address, vault: p.vault, treasury, pool: c.pool, consignment: c.consignment, sellerPayout: c.sellerPayout, tokenProgram: TOKEN_PROGRAM_ID } as any).rpc());
+      // Odd lots pay the seller through the list of extra consignments instead of the named one,
+      // so both ways a lot can be filled by players are exercised with real money.
+      const listed = !!c.consignment && i % 2 === 1;
+      await retry(() => program.methods.claimLot(i).accountsPartial({ crank: operator.publicKey, yard: p.yard, unit, bidderRecord: p.bidder(unit, winner), itemMint: mint, warehouse: p.warehouse(mint), winnerTokenAccount: ata.address, vault: p.vault, treasury, pool: c.pool, consignment: listed ? null : c.consignment, sellerPayout: listed ? null : c.sellerPayout, tokenProgram: TOKEN_PROGRAM_ID } as any).remainingAccounts(listed ? extra : []).rpc());
+      if (listed) console.log("    (paid through the extra-consignment list)");
       const after = BigInt((await connection.getTokenAccountBalance(ata.address)).value.amount);
       record(`claim ${lot.qty}× ${CATALOG[lot.item].name}`, after - before === BigInt(lot.qty));
       const sellerGot = sellerAta ? BigInt((await connection.getTokenAccountBalance(sellerAta.address)).value.amount) - sellerBefore : 0n;

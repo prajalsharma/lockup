@@ -3,8 +3,8 @@ import { usePlayer } from "@/lib/chain/player";
 import { explorer } from "@/lib/config";
 import { short, usd } from "@/lib/format";
 
-/** Wallet summary shown on a unit page, or the prompt to connect. */
-export function WalletBar() {
+/** Wallet summary shown on a unit page, or the prompt to connect. `held` is the deposit this wallet has escrowed in the unit. */
+export function WalletBar({ held }: { held?: number }) {
   const p = usePlayer();
   if (!p.ready) return <p className="label text-ink-3">Checking for a wallet</p>;
   if (!p.address) {
@@ -23,7 +23,8 @@ export function WalletBar() {
       </div>
       <div><p className="label text-ink-3">Devnet USDC</p><p className="num mt-1">{p.dollars === null ? "reading devnet" : usd(p.dollars)}</p></div>
       <div><p className="label text-ink-3">Devnet SOL</p><p className="num mt-1">{p.sol === null ? "reading devnet" : p.sol.toFixed(3)}</p></div>
-      {p.dollars === 0 && <button type="button" className="btn btn-ghost btn-sm" disabled={!!p.busy} onClick={() => void p.topUp()}>Get starter USDC</button>}
+      {held ? <div><p className="label text-ink-3">Held in this unit</p><p className="num mt-1">{usd(held)}</p></div> : null}
+      {p.dollars === 0 && !held && <button type="button" className="btn btn-ghost btn-sm" disabled={!!p.busy} onClick={() => void p.topUp()}>Get starter USDC</button>}
       <a className="ulink ulink-on text-sm text-ink-2" href="https://faucet.circle.com" target="_blank" rel="noreferrer">More from Circle's faucet</a>
     </div>
   );

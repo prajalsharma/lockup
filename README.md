@@ -5,7 +5,7 @@ Sealed-bid storage units on Solana, built for Solana Blitz v10 on MagicBlock.
 Bid on a sealed storage unit with only three clues about what's inside. The highest bid opens it, and
 the winner keeps the haul or sells it piece by piece.
 
-Bids and contents stay sealed inside MagicBlock's Private Ephemeral Rollup until the clock runs out,
+Bids and contents stay sealed inside MagicBlock's Private Ephemeral Rollup until every bid is in or the clock runs out,
 and MagicBlock VRF decides what each unit holds. After the result commits, MagicBlock pays every bidder on
 Solana by Magic Action, about 6 seconds after the commit is sent. A sealed bid confirms on the rollup in about 0.6
 seconds (eight bids, 555 to 637 ms, timed from a laptop with the network round trip included).

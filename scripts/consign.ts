@@ -59,6 +59,7 @@ async function main() {
   const item = await getOrCreateAssociatedTokenAccount(connection, seller, m, seller.publicKey);
   await mintTo(connection, minter, m, item.address, minter, 3);
   const whBefore = Number((await getAccount(connection, p.warehouse(m))).amount), poolBefore = await poolOf(m), had = Number((await mine(m))?.qty ?? 0);
+  const held = Number((await getAccount(connection, item.address)).amount);
 
   console.log("\n▸ consign");
   const s1 = await sp.methods.consign(new BN(2)).accountsPartial({ ...acct(m, seller.publicKey, item.address), itemMint: m, systemProgram: SystemProgram.programId }).rpc();
@@ -73,7 +74,7 @@ async function main() {
   check("someone else cannot take your consigned items", await fails(() => xp.methods.withdrawConsignment(new BN(1)).accountsPartial({ ...acct(m, stranger.publicKey, strangerItem.address), consignment: p.consign(seller.publicKey, m) }).rpc(), /Unauthorized|ConstraintSeeds|ConstraintHasOne|seeds/i));
   check("taking back more than is waiting is refused", await fails(() => sp.methods.withdrawConsignment(new BN(had + 4)).accountsPartial(acct(m, seller.publicKey, item.address)).rpc(), /NotEnoughConsigned/));
   const s2 = await sp.methods.withdrawConsignment(new BN(1)).accountsPartial(acct(m, seller.publicKey, item.address)).rpc();
-  check("1 item back in the wallet, shelf count down by 1", Number((await getAccount(connection, item.address)).amount) === 1 && (await poolOf(m)) === poolBefore + 2, tx(s2));
+  check("1 item back in the wallet, shelf count down by 1", Number((await getAccount(connection, item.address)).amount) === held - 2 && (await poolOf(m)) === poolBefore + 2, tx(s2));
 
   console.log("\n▸ leave one of every item waiting, so the next unit pays this seller");
   for (const [i, mint] of mints.entries()) {

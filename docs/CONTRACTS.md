@@ -32,6 +32,9 @@ Pins: `anchor-lang 1.0.2`, `ephemeral-rollups-sdk 0.16.2` (features `anchor`, `a
    open, an hour after joining (the bidder also leaves the line); once locked, an hour after the clock
    ran out with no result on Solana.
 
+The door does not wait for the clock when it has no reason to: `close_unit` is allowed once every
+bidder in the locked line has bid, or when the clock runs out, whichever comes first.
+
 ## Resale
 
 Item tokens a winner holds can be sold one piece at a time. All three instructions run on Solana.
@@ -64,8 +67,19 @@ Units are stocked from one warehouse per item. Players can add to it and are pai
   theirs; the rest goes to the treasury. The payout account's owner must be the consigning player.
   After the transfer, the warehouse must still hold at least every item players have waiting.
 
-What the chain does not decide is which player is paid when several have the same item waiting. The
-keeper passes whoever has sold least.
+A lot can be filled by several players at once: one `Consignment` is named in the instruction and
+more follow as (consignment, payout account) pairs in `remaining_accounts`, each checked to be the PDA
+this program derives and passed at most once. The claim is refused unless players' items cover the lot
+as far as they go (`min(lot quantity, items waiting)`), so no part of a sale can go to the operator
+while a player's item of that kind waits.
+
+What the chain does not decide is the order among players who have the same item waiting. The keeper
+passes whoever has sold least.
+
+Known limit: consigning and taking back are not tied to a round. After a unit closes, its winning bid
+and contents are public, so a player could consign an item just before the claim to sell it at that
+lot's price, or take one back to avoid a low one. The keeper claims within seconds of the commit, which
+leaves little room, but the program does not prevent it.
 
 Every sale is written to the item's `Pool`: `auction_sold`, `auction_paid`, `auction_last` from
 `claim_lot`, and `market_sold`, `market_paid`, `market_last` from `buy_item`. Prices are per item in
@@ -126,6 +140,14 @@ and a caller with no login each get an empty record for someone else's transacti
 Left as they are, and worth knowing: the operator can change who may read a unit's public state on the
 rollup; bidder records and units are never closed, so their rent stays locked; rollup accounts are not
 closed before a unit returns, so the rent the unit sponsors for them is not recovered.
+
+### Second review, seller pool (26 Nov 2026)
+
+A second agent review covered the seller pool and the rewritten `claim_lot`. It found no way to drain or
+overpay from the vault. Fixed: a lot could be blocked when two players each held part of it and the
+yard had no stock of its own, and the operator could route most of a lot's share to itself by naming a
+small consignment; both are closed by the coverage rule above. Left as a stated limit: the timing
+option described under the seller pool.
 
 ## Checked on devnet
 

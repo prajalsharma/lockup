@@ -520,7 +520,10 @@ pub mod lockup {
             let unit = &ctx.accounts.unit;
             require!(unit.status == UnitStatus::Bidding, LockupError::WrongStatus);
             require!(unit.stocked, LockupError::NotStocked);
-            require!(Clock::get()?.unix_timestamp >= unit.closes_at, LockupError::BiddingStillOpen);
+            // The door opens when the clock runs out, or as soon as everyone in line has bid:
+            // the line is locked by now, so nobody is left who could still bid.
+            let everyone_bid = unit.bid_count as usize == unit.slots.len();
+            require!(everyone_bid || Clock::get()?.unix_timestamp >= unit.closes_at, LockupError::BiddingStillOpen);
             require_eq!(
                 ctx.remaining_accounts.len(),
                 unit.bid_count as usize + 1,
@@ -672,7 +675,7 @@ pub mod lockup {
     }
 
     /// Move one lot of the contents from the warehouse to the winner. Anyone can run it.
-    pub fn claim_lot(ctx: Context<ClaimLot>, lot_index: u8) -> Result<()> {
+    pub fn claim_lot<'info>(ctx: Context<'info, ClaimLot<'info>>, lot_index: u8) -> Result<()> {
         let unit = &ctx.accounts.unit;
         require!(unit.status == UnitStatus::Closed, LockupError::WrongStatus);
         // `won` is only set by `settle_bidder`, so a winner who reclaimed a stalled deposit
@@ -723,32 +726,77 @@ pub mod lockup {
         // Consigned items sell before the yard's own stock, so the operator cannot keep a sale
         // for itself while a player's item waits.
         let qty = lot.qty as u64;
+        // Every waiting player item of this kind is used before the yard's own stock, up to the
+        // size of the lot. One consignment can be named; more follow as (consignment, payout)
+        // pairs in `remaining_accounts`, so a lot can be filled by several players at once.
+        let need = qty.min(ctx.accounts.pool.consigned);
         let mut used = 0u64;
         let mut to_seller = 0u64;
-        if ctx.accounts.pool.consigned > 0 {
-            let c = ctx.accounts.consignment.as_mut().ok_or(LockupError::ConsignedFirst)?;
-            require!(c.qty > 0, LockupError::ConsignedFirst);
-            used = qty.min(c.qty);
-            to_seller = (share as u128 * used as u128 / qty as u128) as u64;
-            c.qty -= used;
-            c.sold = c.sold.checked_add(used).ok_or(LockupError::Overflow)?;
-            c.earned = c.earned.checked_add(to_seller).ok_or(LockupError::Overflow)?;
-            if to_seller > 0 {
-                let payout = ctx.accounts.seller_payout.as_ref().ok_or(LockupError::InvalidAccount)?;
-                require_keys_eq!(payout.owner, c.seller, LockupError::Unauthorized);
+        if need > 0 {
+            let token_program = ctx.accounts.token_program.key();
+            let vault = ctx.accounts.vault.to_account_info();
+            let yard_info = ctx.accounts.yard.to_account_info();
+            let pay = |to: AccountInfo<'info>, amount: u64| -> Result<()> {
                 token::transfer(
                     CpiContext::new_with_signer(
-                        ctx.accounts.token_program.key(),
-                        SplTransfer {
-                            from: ctx.accounts.vault.to_account_info(),
-                            to: payout.to_account_info(),
-                            authority: ctx.accounts.yard.to_account_info(),
-                        },
+                        token_program,
+                        SplTransfer { from: vault.clone(), to, authority: yard_info.clone() },
                         &[seeds],
                     ),
-                    to_seller,
-                )?;
+                    amount,
+                )
+            };
+            let mut first: Option<Pubkey> = None;
+            if let Some(c) = ctx.accounts.consignment.as_mut() {
+                first = Some(c.key());
+                let take = qty.min(c.qty);
+                let cut = (share as u128 * take as u128 / qty as u128) as u64;
+                c.qty -= take;
+                c.sold = c.sold.checked_add(take).ok_or(LockupError::Overflow)?;
+                c.earned = c.earned.checked_add(cut).ok_or(LockupError::Overflow)?;
+                if cut > 0 {
+                    let payout = ctx.accounts.seller_payout.as_ref().ok_or(LockupError::InvalidAccount)?;
+                    require_keys_eq!(payout.owner, c.seller, LockupError::Unauthorized);
+                    pay(payout.to_account_info(), cut)?;
+                }
+                used += take;
+                to_seller += cut;
             }
+            let yard_key = ctx.accounts.yard.key();
+            let mint_key = ctx.accounts.item_mint.key();
+            let bid_mint = ctx.accounts.yard.bid_mint;
+            let mut previous: Option<Pubkey> = None;
+            for pair in ctx.remaining_accounts.chunks(2) {
+                require!(pair.len() == 2, LockupError::InvalidAccount);
+                let key = pair[0].key();
+                // Each consignment once: not the named one, and in rising key order.
+                require!(Some(key) != first, LockupError::InvalidAccount);
+                require!(previous.map_or(true, |p| key > p), LockupError::InvalidAccount);
+                previous = Some(key);
+                let mut c: Account<Consignment> = Account::try_from(&pair[0])?;
+                let expected = Pubkey::create_program_address(
+                    &[CONSIGN_SEED, yard_key.as_ref(), c.seller.as_ref(), mint_key.as_ref(), &[c.bump]],
+                    ctx.program_id,
+                )
+                .map_err(|_| error!(LockupError::InvalidAccount))?;
+                require_keys_eq!(key, expected, LockupError::InvalidAccount);
+                let payout: Account<TokenAccount> = Account::try_from(&pair[1])?;
+                require_keys_eq!(payout.mint, bid_mint, LockupError::MintMismatch);
+                require_keys_eq!(payout.owner, c.seller, LockupError::Unauthorized);
+                let take = (qty - used).min(c.qty);
+                let cut = (share as u128 * take as u128 / qty as u128) as u64;
+                c.qty -= take;
+                c.sold = c.sold.checked_add(take).ok_or(LockupError::Overflow)?;
+                c.earned = c.earned.checked_add(cut).ok_or(LockupError::Overflow)?;
+                if cut > 0 {
+                    pay(pair[1].clone(), cut)?;
+                }
+                c.exit(ctx.program_id)?;
+                used += take;
+                to_seller += cut;
+            }
+            // The operator cannot keep any part of a sale for itself while a player's item waits.
+            require!(used == need, LockupError::ConsignedFirst);
         }
         let to_house = share - to_seller;
         if to_house > 0 {

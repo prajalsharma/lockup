@@ -91,6 +91,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const unit = data?.units.find((u) => u.id === unitId);
   const [found, setFound] = useState([false, false, false]);
   const [deposit, setDeposit] = useState(1);
+  const [sealMs, setSealMs] = useState<number | null>(null);
   const [amount, setAmount] = useState(0.4);
   const [shown, setShown] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -131,6 +132,8 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const left = unit.closesAt - now;
   const biddingOpen = unit.status === "bidding" && unit.stocked && left > 0;
   const closed = unit.status === "closed";
+  // Once everyone in line has bid the door opens without waiting for the clock.
+  const allIn = unit.bids.length > 0 && unit.bidCount >= unit.bids.length;
   const multi = unit.mode === "multi";
   const players = unit.bids.filter((b) => !b.house).length;
   const won = closed && unit.winner === me;
@@ -139,7 +142,8 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const onFound = (i: number) => setFound((f) => { if (f[i]) return f; sfx.clue(); const n = [...f]; n[i] = true; return n; });
   const maxBid = mine ? mine.deposit : 0;
   const bidAmt = maxBid > 0 ? Math.min(maxBid, amount) : amount;
-  const seal = () => p.bid(unit.id, bidAmt).then((ok) => { if (ok) sfx.lock(); return !!ok; });
+  // How long the sealed bid took to confirm on the private rollup, measured in this browser.
+  const seal = () => { const t0 = performance.now(); return p.bid(unit.id, bidAmt).then((ok) => { if (ok) { setSealMs(Math.round(performance.now() - t0)); sfx.lock(); } return !!ok; }); };
   // You can deposit up to what the wallet holds, capped at $5 so one unit can't swallow a balance.
   // A wallet with no USDC yet is sent 1 USDC when it lines up, so plan around that.
   const spendable = p.dollars && p.dollars > 0 ? p.dollars : 1;
@@ -149,8 +153,8 @@ export function LiveStage({ unitId }: { unitId: number }) {
   let big = "—";
   if (unit.status === "created") phaseLabel = "Setting up";
   if (unit.status === "bidding") {
-    phaseLabel = !unit.stocked ? (unit.onRollup ? "Filling the unit" : "Rolling the dice") : left > 0 ? "Door opens in" : "Opening bids";
-    big = unit.stocked ? clock(left) : "—";
+    phaseLabel = !unit.stocked ? (unit.onRollup ? "Filling the unit" : "Rolling the dice") : left > 0 && !allIn ? "Door opens in" : "Opening bids";
+    big = !unit.stocked ? "—" : allIn ? "Now" : clock(left);
   }
   if (closed) phaseLabel = "Opened";
 
@@ -179,7 +183,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
         </div>
 
         <div className="mt-6 space-y-8">
-          {!closed && <WalletBar />}
+          {!closed && <WalletBar held={mine?.deposit} />}
 
           {(unit.status === "created" || unit.status === "open") && (
             <p className="text-[17px] text-ink-2">
@@ -260,7 +264,8 @@ export function LiveStage({ unitId }: { unitId: number }) {
               <p className="label text-ink-3">Your bid, locked in</p>
               <p className="display num mt-2 text-[72px] leading-none">{myBid !== null ? usd(myBid) : "Sealed"}</p>
               <span className="stamp display absolute right-5 top-5 border-2 border-accent-text px-3 py-1 text-[22px] text-accent-text">Sealed</span>
-              <p className="mt-3 text-ink-2">{left > 0 ? "The door opens when the clock hits zero." : "Reading every bid at once and sending the result to Solana."}</p>
+              {sealMs !== null && <p className="label num mt-3 text-accent-text">Confirmed on MagicBlock's private rollup in {sealMs} ms</p>}
+              <p className="mt-3 text-ink-2">{left > 0 && !allIn ? "The door opens as soon as every bid is in, or when the clock runs out." : "Every bid is in. Reading them all at once and sending the result to Solana."}</p>
             </div>
           )}
 
