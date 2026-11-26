@@ -10,7 +10,12 @@ export interface ChainUnit {
   duration: number;
   closesAt: number;
   bidCount: number;
-  bids: { who: string; house: boolean; deposit: number; hasBid: boolean; bid: number | null }[];
+  /**
+   * `bid` is the amount, and only once the unit is closed. While bids are sealed the table sees
+   * `raises` (how many times this bidder raised), `locked` (they are done) and `lastAt` (when
+   * they last acted, in ms), and nothing about amounts.
+   */
+  bids: { who: string; house: boolean; deposit: number; hasBid: boolean; bid: number | null; raises: number; locked: boolean; lastAt: number | null }[];
   clues: { kind: number; arg: number }[];
   winner: string | null;
   winningBid: number;
@@ -80,4 +85,14 @@ export interface MarketListing {
   value: number;
   price: number;
   qty: number;
+}
+
+/** One unit's table, read straight from the private rollup several times a second while bids are sealed. */
+export interface Pulse {
+  status: ChainUnit["status"];
+  stocked: boolean;
+  closesAt: number;
+  bidCount: number;
+  bids: { who: string; hasBid: boolean; raises: number; locked: boolean; lastAt: number | null }[];
+  readAt: number;
 }

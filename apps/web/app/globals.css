@@ -185,6 +185,11 @@ html.lenis, html.lenis body { height: auto; }
 }
 .stamp { animation: stamp 420ms var(--ease-out) both; }
 
+/* A seat at the table flashes when its bidder moves. */
+@keyframes tell { 0% { background: var(--accent); color: #14110a; } 100% { background: transparent; } }
+.tell { animation: tell 900ms var(--ease-out) both; padding: 2px 6px; margin: -2px -6px; }
+@media (prefers-reduced-motion: reduce) { .tell { animation: none; } }
+
 /* A slip feeding out of a printer, a line at a time, with a torn bottom edge. */
 @keyframes print { from { clip-path: inset(0 0 100% 0); transform: translateY(-10px); } to { clip-path: inset(0 0 0 0); transform: none; } }
 .slip { animation: print 1100ms steps(11, end) 500ms both; }

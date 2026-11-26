@@ -122,6 +122,30 @@ export async function readUnits(k: Keeper | null, limit = WINDOW): Promise<{ yar
   return { yard, units };
 }
 
+/**
+ * What the table may see of a bidder while bids are sealed. The program keeps it in the slot's
+ * `bid` field until the unit closes: raises in the low 16 bits, locked in bit 16, and the second
+ * of the last action (counted from the start of the bidding clock) in the high 32 bits.
+ */
+export function tellOf(bid: any): { raises: number; locked: boolean; lastAt: number } {
+  return { raises: bid.maskn(16).toNumber(), locked: bid.testn(16), lastAt: bid.shrn(32).toNumber() };
+}
+/** A slot as the site shows it while bids are sealed: never an amount. */
+export function seatOf(u: any, s: any): { raises: number; locked: boolean; lastAt: number | null } {
+  const t = "bidding" in u.status && s.hasBid ? tellOf(s.bid) : null;
+  return { raises: t?.raises ?? 0, locked: !!t?.locked, lastAt: t ? (Number(u.closesAt) - Number(u.duration) + t.lastAt) * 1000 : null };
+}
+/** One unit, from the private rollup when it can be read there, otherwise from Solana. */
+export async function readUnit(k: Keeper | null, id: number): Promise<any | null> {
+  const key = unitPda(id);
+  if (k) {
+    try { return await (prog(await tee(k.keeper), k.keeper).account as any).unit.fetch(key); } catch { /* not on the rollup */ }
+  }
+  const info = await connection.getAccountInfo(key);
+  if (!info) return null;
+  try { return prog(connection, k?.keeper ?? Keypair.generate()).coder.accounts.decode("unit", info.data); } catch { return null; }
+}
+
 const status = (u: any) => Object.keys(u.status)[0] as "created" | "open" | "bidding" | "closed";
 const isMulti = (u: any) => Number(u.duration) >= MULTI_SECONDS;
 const isHouse = (k: Keeper, who: PublicKey) => k.house.some((h) => h.publicKey.equals(who));
@@ -269,20 +293,41 @@ export async function tick(k: Keeper, budgetMs = 40_000): Promise<TickReport> {
           });
           continue;
         }
-        // The program opens the door as soon as everyone in line has bid, so nobody waits out the clock.
-        const everyoneBid = u.slots.length > 0 && u.slots.every((s: any) => s.hasBid);
+        // The program opens the door once everyone in line has bid and locked in, so nobody waits out the clock.
+        let everyoneBid = u.slots.length > 0 && u.slots.every((s: any) => s.hasBid && tellOf(s.bid).locked);
         if (now < Number(u.closesAt) && !everyoneBid) {
+          // The house rule, the same every round and shown on the unit page: open at 70% of the
+          // limit the clues suggest, raise once to that limit after a player has bid, and lock in
+          // when every player has, or with 12 seconds left.
+          const players = u.slots.filter((s: any) => !isHouse(k, s.bidder));
+          const lockedNow = new Set<string>();
           for (const [n, h] of k.house.entries()) {
             const slot = u.slots.find((s: any) => s.bidder.equals(h.publicKey));
-            if (!slot || slot.hasBid) continue;
-            await step(`house ${n + 1} bids on unit ${id}`, async () => {
-              const hp = prog(await tee(h), h);
-              const bid = bidPda(key, h.publicKey);
-              const seal = await hp.methods.sealBid().accountsPartial({ unit: key, bid, permission: permissionPdaFromAccount(bid), ...perm }).instruction();
-              await hp.methods.placeBid(new BN(houseBid(key, n, u.clues))).accountsPartial({ bidder: h.publicKey, unit: key, bid }).postInstructions([seal]).rpc();
-            });
+            if (!slot) continue;
+            const limit = houseBid(key, n, u.clues);
+            const opening = Math.max(MIN_BID, Math.floor((limit * 0.7) / 10_000) * 10_000);
+            const bid = bidPda(key, h.publicKey);
+            if (!slot.hasBid) {
+              await step(`house ${n + 1} bids on unit ${id}`, async () => {
+                const hp = prog(await tee(h), h);
+                const seal = await hp.methods.sealBid().accountsPartial({ unit: key, bid, permission: permissionPdaFromAccount(bid), ...perm }).instruction();
+                await hp.methods.placeBid(new BN(opening)).accountsPartial({ bidder: h.publicKey, unit: key, bid }).postInstructions([seal]).rpc();
+              });
+              continue;
+            }
+            const tell = tellOf(slot.bid);
+            if (tell.locked) continue;
+            if (tell.raises === 0 && limit > opening && players.some((s: any) => s.hasBid)) {
+              await step(`house ${n + 1} raises on unit ${id}`, async () => prog(await tee(h), h).methods.raiseBid(new BN(limit)).accountsPartial({ bidder: h.publicKey, unit: key, bid }).rpc());
+              continue;
+            }
+            if (players.every((s: any) => s.hasBid && tellOf(s.bid).locked) || Number(u.closesAt) - now <= 12) {
+              if (await step(`house ${n + 1} locks in on unit ${id}`, async () => prog(await tee(h), h).methods.lockIn().accountsPartial({ bidder: h.publicKey, unit: key }).rpc())) lockedNow.add(h.publicKey.toBase58());
+            }
           }
-          continue;
+          // If that was the last lock-in, open the door in this same pass.
+          everyoneBid = u.slots.every((s: any) => s.hasBid && (tellOf(s.bid).locked || lockedNow.has(s.bidder.toBase58())));
+          if (!everyoneBid) continue;
         }
         if (everyoneBid || now >= Number(u.closesAt) + 1) {
           const bids = u.slots.filter((s: any) => s.hasBid).map((s: any) => bidPda(key, s.bidder));

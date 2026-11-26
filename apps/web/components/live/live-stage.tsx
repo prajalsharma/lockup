@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChainFlowLive } from "@/components/chain-flow";
 import { clueText, useChainYard } from "@/components/chain-rounds";
 import { Door, useReducedMotion } from "@/components/door/door";
@@ -10,7 +10,7 @@ import { usePlayer } from "@/lib/chain/player";
 import { verdict } from "@/lib/rank";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { MULTI_LINE_SECONDS, RPC, TEE_RPC, bidPda } from "@/lib/chain/shared";
-import type { ChainUnit } from "@/lib/chain/types";
+import type { ChainUnit, Pulse } from "@/lib/chain/types";
 import { explorer } from "@/lib/config";
 import { clock, pad2, short, usd } from "@/lib/format";
 import { sfx } from "@/lib/sound";
@@ -18,10 +18,40 @@ import { useNow } from "@/lib/hooks";
 import { paintFor } from "./live-corridor";
 import { WalletBar } from "./wallet-bar";
 
-function Line({ unit, me }: { unit: ChainUnit; me: string | null }) {
+/** What the table may know about a seat while bids are sealed: that it acted, and when. */
+function tellText(b: ChainUnit["bids"][number], now: number) {
+  if (!b.hasBid) return `up to ${usd(b.deposit)}`;
+  if (b.locked) return "locked in";
+  const ago = b.lastAt ? Math.max(0, Math.round((now - b.lastAt) / 1000)) : null;
+  const when = ago === null ? "" : ago < 2 ? " · just now" : ` · ${ago} s ago`;
+  return b.raises ? `raised ${b.raises}×${when}` : `bid sealed${when}`;
+}
+
+/** The unit's table from the private rollup, twice a second while bids are sealed. */
+function usePulse(id: number, on: boolean) {
+  const [pulse, setPulse] = useState<Pulse | null>(null);
+  useEffect(() => {
+    if (!on) { setPulse(null); return; }
+    let live = true;
+    let busy = false;
+    const read = async () => {
+      if (busy || document.visibilityState !== "visible") return;
+      busy = true;
+      try { const r = await fetch(`/api/pulse/${id}`); if (r.ok && live) setPulse(await r.json()); } catch { /* next read */ }
+      busy = false;
+    };
+    void read();
+    const t = setInterval(read, 500);
+    return () => { live = false; clearInterval(t); };
+  }, [id, on]);
+  return pulse;
+}
+
+function Line({ unit, me, now }: { unit: ChainUnit; me: string | null; now: number }) {
+  const sealed = unit.status === "bidding" && unit.stocked;
   return (
     <div>
-      <p className="label text-ink-3">In line · deposits are public</p>
+      <p className="label text-ink-3">{sealed ? "At the table · you see who moved, never how much" : "In line · deposits are public"}</p>
       <ul className="mt-2 border-t border-line">
         {unit.bids.map((b) => (
           <li key={b.who} className="flex items-center justify-between border-b border-line py-2.5">
@@ -29,10 +59,12 @@ function Line({ unit, me }: { unit: ChainUnit; me: string | null }) {
               {b.who === me ? "You" : short(b.who)}
               {b.house && <span className="label ml-3 text-ink-3">House</span>}
             </span>
-            <span className="num text-ink-2">{b.hasBid ? "bid sealed" : `up to ${usd(b.deposit)}`}</span>
+            {/* Re-keyed on every move, so the seat flashes when its bidder acts. */}
+            <span key={`${b.hasBid}-${b.raises}-${b.locked}`} className={`num ${b.hasBid ? "tell" : ""} ${b.locked ? "text-ink" : "text-ink-2"}`}>{tellText(b, now)}</span>
           </li>
         ))}
       </ul>
+      {sealed && unit.bids.some((b) => b.house) && <p className="mt-3 text-sm text-ink-2">House bidders play one fixed way: open at 70% of what the clues say the unit is worth to them, raise once to their limit after a player bids, and lock in when every player has, or with 12 seconds left.</p>}
     </div>
   );
 }
@@ -88,10 +120,19 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const p = usePlayer();
   const now = useNow();
   const reduced = useReducedMotion();
-  const unit = data?.units.find((u) => u.id === unitId);
+  const base = data?.units.find((u) => u.id === unitId);
+  // While bids are sealed, the table comes from the rollup twice a second instead of every three.
+  const pulse = usePulse(unitId, base?.status === "bidding" && base.onRollup);
+  const unit = useMemo(() => {
+    if (!base || !pulse || base.status !== "bidding" || pulse.status !== "bidding") return base;
+    return { ...base, stocked: pulse.stocked, closesAt: pulse.closesAt, bidCount: pulse.bidCount, bids: base.bids.map((b) => ({ ...b, ...(pulse.bids.find((x) => x.who === b.who) ?? {}) })) };
+  }, [base, pulse]);
   const [found, setFound] = useState([false, false, false]);
   const [deposit, setDeposit] = useState(1);
-  const [sealMs, setSealMs] = useState<number | null>(null);
+  // Moves made on this page: how long each took from sending to confirmed on the private rollup.
+  const [from] = useState(() => p.moves.length);
+  const acts = p.moves.slice(from);
+  const [raiseTo, setRaiseTo] = useState<number | null>(null);
   const [amount, setAmount] = useState(0.4);
   const [shown, setShown] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -132,8 +173,8 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const left = unit.closesAt - now;
   const biddingOpen = unit.status === "bidding" && unit.stocked && left > 0;
   const closed = unit.status === "closed";
-  // Once everyone in line has bid the door opens without waiting for the clock.
-  const allIn = unit.bids.length > 0 && unit.bidCount >= unit.bids.length;
+  // Once everyone in line has bid and locked in, the door opens without waiting for the clock.
+  const allIn = unit.bids.length > 0 && unit.bids.every((b) => b.hasBid && b.locked);
   const multi = unit.mode === "multi";
   const players = unit.bids.filter((b) => !b.house).length;
   const won = closed && unit.winner === me;
@@ -142,8 +183,14 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const onFound = (i: number) => setFound((f) => { if (f[i]) return f; sfx.clue(); const n = [...f]; n[i] = true; return n; });
   const maxBid = mine ? mine.deposit : 0;
   const bidAmt = maxBid > 0 ? Math.min(maxBid, amount) : amount;
-  // How long the sealed bid took to confirm on the private rollup, measured in this browser.
-  const seal = () => { const t0 = performance.now(); return p.bid(unit.id, bidAmt).then((ok) => { if (ok) { setSealMs(Math.round(performance.now() - t0)); sfx.lock(); } return !!ok; }); };
+  const timed = (f: () => Promise<boolean>) => f().then((ok) => { if (ok) sfx.lock(); return !!ok; });
+  const seal = () => timed(() => p.bid(unit.id, bidAmt));
+  // A raise goes from one cent above the current bid up to the deposit.
+  const cents = (n: number) => Math.round(n * 100);
+  const current = myBid ?? unit.minBid;
+  const canRaise = cents(maxBid) > cents(current);
+  const raiseAmt = canRaise ? Math.min(maxBid, Math.max((cents(current) + 1) / 100, raiseTo ?? (cents(current) + 5) / 100)) : current;
+  const median = acts.length ? [...acts].sort((a, b) => a - b)[Math.floor((acts.length - 1) / 2)] : 0;
   // You can deposit up to what the wallet holds, capped at $5 so one unit can't swallow a balance.
   // A wallet with no USDC yet is sent 1 USDC when it lines up, so plan around that.
   const spendable = p.dollars && p.dollars > 0 ? p.dollars : 1;
@@ -261,23 +308,43 @@ export function LiveStage({ unitId }: { unitId: number }) {
 
           {unit.status === "bidding" && mine?.hasBid && (
             <div className="relative border border-line-2 p-6">
-              <p className="label text-ink-3">Your bid, locked in</p>
+              <p className="label text-ink-3">{mine.locked ? "Your bid, locked in" : "Your sealed bid"}</p>
               <p className="display num mt-2 text-[72px] leading-none">{myBid !== null ? usd(myBid) : "Sealed"}</p>
-              <span className="stamp display absolute right-5 top-5 border-2 border-accent-text px-3 py-1 text-[22px] text-accent-text">Sealed</span>
-              {sealMs !== null && <p className="label num mt-3 text-accent-text">Confirmed on MagicBlock's private rollup in {sealMs} ms</p>}
-              <p className="mt-3 text-ink-2">{left > 0 && !allIn ? "The door opens as soon as every bid is in, or when the clock runs out." : "Every bid is in. Reading them all at once and sending the result to Solana."}</p>
+              <span key={String(mine.locked)} className="stamp display absolute right-5 top-5 border-2 border-accent-text px-3 py-1 text-[22px] text-accent-text">{mine.locked ? "Locked" : "Sealed"}</span>
+              {acts.length > 0 && <p className="label num mt-3 text-accent-text">{acts.length} sealed {acts.length === 1 ? "move" : "moves"} · confirmed in {median} ms{acts.length === 1 ? "" : " (median)"} on MagicBlock's private rollup</p>}
+              {!mine.locked && left > 0 ? (
+                <>
+                  <p className="mt-3 text-ink-2">Raise as often as you like. The table sees that you raised and when, never how much, so a one-cent raise looks the same as a big one.</p>
+                  {canRaise && (
+                    <>
+                      <div className="mt-5 flex items-baseline justify-between">
+                        <label htmlFor="raise" className="label text-ink-3">Raise to</label>
+                        <span className="display num text-[32px] leading-none">{usd(raiseAmt)}</span>
+                      </div>
+                      <input id="raise" type="range" className="bid mt-2" min={(cents(current) + 1) / 100} max={maxBid} step={0.01} value={raiseAmt} onChange={(e) => setRaiseTo(Number(e.target.value))} aria-label="Raise your sealed bid to" />
+                    </>
+                  )}
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <button type="button" className="btn btn-ghost" disabled={!!p.busy || !canRaise} onClick={() => void timed(() => p.raise(unit.id, raiseAmt)).then((ok) => ok && setRaiseTo(null))}>{canRaise ? "Raise, sealed" : "At your deposit"}</button>
+                    <button type="button" className="btn btn-primary" disabled={!!p.busy} onClick={() => void timed(() => p.lockIn(unit.id))}>Lock in</button>
+                  </div>
+                  <p className="mt-3 text-sm text-ink-2">Lock in when you're done. The door opens once everyone has, or when the clock runs out.</p>
+                </>
+              ) : (
+                <p className="mt-3 text-ink-2">{left > 0 && !allIn ? "The door opens once everyone has locked in, or when the clock runs out." : "Reading every bid at once and sending the result to Solana."}</p>
+              )}
             </div>
           )}
 
           {unit.status === "bidding" && unit.stocked && left <= 0 && !mine?.hasBid && <Step title="Opening the bids">Every sealed bid is read at once. The result is on its way to Solana.</Step>}
           {unit.status === "bidding" && !mine && left > 0 && <p className="text-ink-2">This door is already locked, so you can only watch. <Link className="ulink ulink-on text-ink" href="/yard">Pick an open door to play.</Link></p>}
+          {!closed && <Line unit={unit} me={me} now={now} />}
           {unit.status === "bidding" && unit.stocked && <Keyhole unit={unit} me={me} />}
 
           {unit.status === "bidding" && mine && !mine.hasBid && left <= 0 && unit.stocked && <p className="text-ink-2">You didn't bid in time. Your whole deposit comes back when the unit settles.</p>}
 
           {p.error && me && <p role="alert" className="text-sm text-bad">{p.error}</p>}
 
-          {!closed && <Line unit={unit} me={me} />}
 
           {closed && (
             <div>

@@ -1908,6 +1908,57 @@
       ]
     },
     {
+      "name": "lock_in",
+      "docs": [
+        "Lock in: this bidder is done. When everyone in line has locked in, the door can open",
+        "without waiting for the clock."
+      ],
+      "discriminator": [
+        251,
+        54,
+        199,
+        39,
+        183,
+        44,
+        105,
+        56
+      ],
+      "accounts": [
+        {
+          "name": "bidder",
+          "signer": true
+        },
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit.yard",
+                "account": "Unit"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "place_bid",
       "docs": [
         "Place a bid. Send `seal_bid` in the same transaction."
@@ -2098,6 +2149,87 @@
           "type": {
             "vec": "bytes"
           }
+        }
+      ]
+    },
+    {
+      "name": "raise_bid",
+      "docs": [
+        "Raise a sealed bid. The new amount stays as private as the first one; what the table",
+        "sees is only that this bidder raised, and when. A raise of one cent looks exactly like a",
+        "raise of a dollar, so a raise can be a bluff."
+      ],
+      "discriminator": [
+        224,
+        66,
+        244,
+        89,
+        37,
+        4,
+        28,
+        45
+      ],
+      "accounts": [
+        {
+          "name": "bidder",
+          "signer": true
+        },
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit.yard",
+                "account": "Unit"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bid",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  105,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              },
+              {
+                "kind": "account",
+                "path": "bidder"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
         }
       ]
     },
@@ -3507,6 +3639,21 @@
       "code": 6036,
       "name": "NotEnoughConsigned",
       "msg": "You don't have that many consigned"
+    },
+    {
+      "code": 6037,
+      "name": "RaiseTooLow",
+      "msg": "A raise has to be higher than your current bid"
+    },
+    {
+      "code": 6038,
+      "name": "LockedIn",
+      "msg": "You locked in, so this bid can't change"
+    },
+    {
+      "code": 6039,
+      "name": "NoBidYet",
+      "msg": "Place a bid before you raise or lock in"
     }
   ],
   "types": [
@@ -3891,7 +4038,10 @@
           {
             "name": "bid",
             "docs": [
-              "Zero until the unit is closed."
+              "The bid amount, but only once the unit is closed. While bidding is open the amount stays",
+              "in the sealed `Bid` account, and this field carries what the table is allowed to see of",
+              "the bidder: how many times they raised, when they last acted, and whether they locked in.",
+              "`close_unit` overwrites it with the amount."
             ],
             "type": "u64"
           }

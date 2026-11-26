@@ -18,7 +18,7 @@ export default function YardPage() {
         {[
           ["Connect a wallet", "A new wallet is sent 1 devnet USDC and a little SOL for fees."],
           ["Pick a door and line up", "Put down a deposit. It is the most you can bid, and everyone can see it."],
-          ["Read the clues, seal one bid", "When the door locks, three clues go up. Your bid stays hidden from everyone."],
+          ["Read the clues, seal a bid, raise if you dare", "When the door locks, three clues go up. Your bid stays hidden. The table only sees who raised and when, so watch the others and lock in when you are done."],
           ["The highest bid opens it", "Losers get everything back. The winner keeps the items or sells them."],
         ].map(([t, d], i) => (
           <li key={t} className="flex gap-4">

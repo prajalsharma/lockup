@@ -53,8 +53,31 @@ pub struct Slot {
     /// Escrowed on Solana. Public. Caps the bid.
     pub deposit: u64,
     pub has_bid: bool,
-    /// Zero until the unit is closed.
+    /// The bid amount, but only once the unit is closed. While bidding is open the amount stays
+    /// in the sealed `Bid` account, and this field carries what the table is allowed to see of
+    /// the bidder: how many times they raised, when they last acted, and whether they locked in.
+    /// `close_unit` overwrites it with the amount.
     pub bid: u64,
+}
+
+/// What everyone at the table can see of a bidder while bids are sealed. Never an amount.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Tell {
+    /// How many times the bidder has raised their sealed bid.
+    pub raises: u16,
+    /// Locked in: this bidder is done, and cannot raise again.
+    pub locked: bool,
+    /// Seconds after the bidding clock started at which they last acted.
+    pub last_at: u32,
+}
+
+impl Slot {
+    pub fn tell(&self) -> Tell {
+        Tell { raises: self.bid as u16, locked: self.bid & (1 << 16) != 0, last_at: (self.bid >> 32) as u32 }
+    }
+    pub fn set_tell(&mut self, t: Tell) {
+        self.bid = t.raises as u64 | (t.locked as u64) << 16 | (t.last_at as u64) << 32;
+    }
 }
 
 #[account]
@@ -107,6 +130,14 @@ pub struct Unit {
 impl Unit {
     pub fn slot_index(&self, bidder: &Pubkey) -> Option<usize> {
         self.slots.iter().position(|s| s.bidder == *bidder)
+    }
+    /// Seconds since the bidding clock started, for stamping a bidder's last action.
+    pub fn seconds_in(&self, now: i64) -> u32 {
+        now.saturating_sub(self.closes_at.saturating_sub(self.duration)).clamp(0, u32::MAX as i64) as u32
+    }
+    /// True once nobody in line can change the outcome: everyone has bid and locked in.
+    pub fn everyone_locked(&self) -> bool {
+        !self.slots.is_empty() && self.slots.iter().all(|s| s.has_bid && s.tell().locked)
     }
 }
 

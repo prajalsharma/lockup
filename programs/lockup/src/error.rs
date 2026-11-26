@@ -76,4 +76,10 @@ pub enum LockupError {
     ConsignedFirst,
     #[msg("You don't have that many consigned")]
     NotEnoughConsigned,
+    #[msg("A raise has to be higher than your current bid")]
+    RaiseTooLow,
+    #[msg("You locked in, so this bid can't change")]
+    LockedIn,
+    #[msg("Place a bid before you raise or lock in")]
+    NoBidYet,
 }

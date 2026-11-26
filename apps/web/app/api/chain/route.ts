@@ -1,6 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
-import { loadKeeper, readUnits, tick } from "@/lib/chain/keeper";
+import { loadKeeper, readUnits, seatOf, tick } from "@/lib/chain/keeper";
 import { ITEMS, MULTI_SECONDS, PROGRAM, YARD } from "@/lib/chain/shared";
 import type { ChainUnit, ChainYard } from "@/lib/chain/types";
 
@@ -27,7 +27,7 @@ export async function GET() {
       return {
         id, address: key.toBase58(), status, onRollup, mode: Number(u.duration) >= MULTI_SECONDS ? "multi" : "solo", stocked: u.stocked,
         minBid: Number(u.minBid) / 1e6, duration: Number(u.duration), closesAt: Number(u.closesAt) * 1000, bidCount: u.bidCount,
-        bids: u.slots.map((s: any) => ({ who: s.bidder.toBase58(), house: house.has(s.bidder.toBase58()), deposit: Number(s.deposit) / 1e6, hasBid: s.hasBid, bid: closed && s.hasBid ? Number(s.bid) / 1e6 : null })),
+        bids: u.slots.map((s: any) => ({ who: s.bidder.toBase58(), house: house.has(s.bidder.toBase58()), deposit: Number(s.deposit) / 1e6, hasBid: s.hasBid, bid: closed && s.hasBid ? Number(s.bid) / 1e6 : null, ...seatOf(u, s) })),
         clues: u.stocked ? u.clues.map((c: any) => ({ kind: c.kind, arg: c.arg })) : [],
         winner, winningBid: Number(u.winningBid) / 1e6, value: u.value / 100,
         lots: closed ? u.lots.map((l: any) => ({ name: ITEMS[l.item].name, id: ITEMS[l.item].id, rarity: ITEMS[l.item].rarity, heavy: ITEMS[l.item].heavy, qty: l.qty, value: (ITEMS[l.item].value * l.qty) / 100 })) : [],

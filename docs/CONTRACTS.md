@@ -16,9 +16,14 @@ Pins: `anchor-lang 1.0.2`, `ephemeral-rollups-sdk 0.16.2` (features `anchor`, `a
    It refuses a unit that has no draw.
 5. **Stock.** Inside the rollup, `stock_unit(salt)` derives the contents from
    `sha256(randomness, salt, unit)`, writes them to a private manifest and posts three clues.
-6. **Bid.** `place_bid` + `seal_bid` create a bid only its bidder can read.
-7. **Close.** After the clock, `close_unit` reads every bid, picks the highest (ties go to the earlier
-   bid) and writes bids, winner, contents and salt into the unit. `commit_unit` returns it to Solana.
+6. **Bid, raise, lock in.** `place_bid` + `seal_bid` create a bid only its bidder can read.
+   `raise_bid(amount)` replaces the amount with a higher one, as often as the bidder likes, never above
+   the deposit. `lock_in` ends that bidder's round. The amount lives only in the sealed bid account.
+   What the unit shows publicly for each bidder is a count of raises, the second of their last move and
+   whether they locked in; a raise of one cent is indistinguishable from a large one. That public part
+   is kept in the slot's `bid` field, which holds the amount only after the unit closes.
+7. **Close.** Once every bidder has locked in, or after the clock, `close_unit` reads every bid, picks
+   the highest (ties go to whoever reached that amount first; a raise gives up the earlier place) and writes bids, winner, contents and salt into the unit. `commit_unit` returns it to Solana.
 8. **Settle.** The commit is sent with `commit_and_settle`, which schedules one Magic Action per bidder.
    When the unit is back on Solana, MagicBlock's validator runs `settle_on_commit` for each of them through
    the delegation program: the winner gets `deposit − bid`, everyone else their full deposit. Fees come from
@@ -33,7 +38,11 @@ Pins: `anchor-lang 1.0.2`, `ephemeral-rollups-sdk 0.16.2` (features `anchor`, `a
    ran out with no result on Solana.
 
 The door does not wait for the clock when it has no reason to: `close_unit` is allowed once every
-bidder in the locked line has bid, or when the clock runs out, whichever comes first.
+bidder in the locked line has bid and locked in, or when the clock runs out, whichever comes first.
+
+House bidders follow one published rule, run by the keeper: open at 70% of the limit the three clues
+suggest, raise once to that limit after a player has bid, and lock in when every player has or with
+12 seconds left.
 
 ## Resale
 
@@ -168,7 +177,7 @@ every item consigned by a test seller so the next round pays a player.
 `pnpm round` drives a whole round with two wallets and asserts every step, including the privacy
 reads and exact settlement amounts. It checks that each lot releases exactly its share of the bid, that
 the shares add up to the winning bid, that a claim which skips a waiting consignment is refused, and
-that a consigned item's share cannot be sent to anyone but its seller. The hosted site has also been played end to end with the in-browser
+that a consigned item's share cannot be sent to anyone but its seller. On the rollup it checks raising and locking in: a raise below the current bid, above the deposit, on someone else's bid or after locking in is refused; the table shows the raise counts and no amount; the other bidder still cannot read a raised bid; the door stays shut while anyone has not locked in and opens before the clock once everyone has. The hosted site has also been played end to end with the in-browser
 quick wallet. Wallet extensions connect through Solana Wallet Adapter. That path has been played end to end on the
 hosted site with an injected wallet implementing the Wallet Standard interface (connect, signTransaction,
 signMessage); a real Phantom, Solflare or Backpack install has not been driven. Email sign-in through

@@ -203,14 +203,55 @@ async function main() {
     record(`someone not logged in cannot read ${what}`, !got.includes("SECRET IN DATA"));
   }
 
+  head("Private rollup: raise and lock in");
+  const refusedOnRollup = async (build: any, want: RegExp) => {
+    try { await build.simulate(); console.log("      NOT refused"); return false; } catch (e) {
+      const text = JSON.stringify((e as any)?.simulationResponse ?? "") + String(e);
+      if (!want.test(text)) console.log("      got:", text.slice(0, 500));
+      return want.test(text);
+    }
+  };
+  const tellOf = (bid: any) => ({ raises: bid.maskn(16).toNumber(), locked: bid.testn(16), lastAt: bid.shrn(32).toNumber() });
+  const seat = async (k: Keypair) => { const x = await (teeOp.account as any).unit.fetch(unit); return x.slots.find((sl: any) => sl.bidder.equals(k.publicKey)); };
+  const raiseOf = (i: number, amount: bigint, who = i) => teeBidders[who].methods.raiseBid(new BN(amount.toString())).accountsPartial({ bidder: wallets[who].publicKey, unit, bid: p.bid(unit, wallets[i].publicKey) });
+  const lockOf = (i: number) => teeBidders[i].methods.lockIn().accountsPartial({ bidder: wallets[i].publicKey, unit });
+  try {
+    record("a raise below the current bid is refused", await refusedOnRollup(raiseOf(0, PLAN[0].bid - CENT), /RaiseTooLow/));
+    record("a raise above the deposit is refused", await refusedOnRollup(raiseOf(0, PLAN[0].deposit + CENT), /BidAboveDeposit/));
+    record("nobody can raise someone else's bid", await refusedOnRollup(raiseOf(0, PLAN[0].bid + CENT, 1), /ConstraintSeeds|Unauthorized|seeds|"Custom":2006/i));
+    const times: number[] = [];
+    for (const [i, up] of [[0, 3n], [1, 2n], [0, 2n]] as [number, bigint][]) {
+      PLAN[i].bid += up * CENT;
+      const t0 = Date.now();
+      await raiseOf(i, PLAN[i].bid).rpc();
+      times.push(Date.now() - t0);
+    }
+    const a = tellOf((await seat(wallets[0])).bid), b = tellOf((await seat(wallets[1])).bid);
+    record("the table sees who raised and how often, and no amount", a.raises === 2 && b.raises === 1 && !a.locked && !b.locked, `A raised ${a.raises}×, B ${b.raises}×; raises confirmed in ${times.join(", ")} ms`);
+    const own: any = await (teeBidders[0].account as any).bid.fetch(bidA);
+    record("A reads its own raised bid", BigInt(own.amount.toString()) === PLAN[0].bid, `$${Number(PLAN[0].bid) / 1e6}`);
+    record("B still cannot read A's bid after the raises", !(await canRead(teeBidders[1], "bid", bidA)));
+    record("the door cannot open while someone has not locked in", await refusedOnRollup(teeOp.methods.closeUnit().accountsPartial({ authority: operator.publicKey, unit })
+      .remainingAccounts([manifest, ...wallets.map((k) => p.bid(unit, k.publicKey))].map((pubkey) => ({ pubkey, isSigner: false, isWritable: false }))), /BiddingStillOpen|"Custom":6014/));
+    await lockOf(0).rpc();
+    record("a locked-in bid cannot be raised", await refusedOnRollup(raiseOf(0, PLAN[0].bid + CENT), /LockedIn/));
+    record("locking in twice is refused", await refusedOnRollup(lockOf(0), /LockedIn/));
+    await lockOf(1).rpc();
+    const la = tellOf((await seat(wallets[0])).bid), lb = tellOf((await seat(wallets[1])).bid);
+    record("both bidders show as locked in", la.locked && lb.locked && la.raises === 2);
+  } catch (e) { record("raise and lock in", false, msg(e)); logs(e); }
+
   head("Private rollup: close and commit");
   u = await (teeOp.account as any).unit.fetch(unit);
-  const wait = Number(u.closesAt) * 1000 - Date.now() + 3000;
+  const everyoneLocked = u.slots.every((sl: any) => sl.hasBid && tellOf(sl.bid).locked);
+  const early = Number(u.closesAt) * 1000 - Date.now();
+  if (everyoneLocked) console.log(`    everyone locked in, so no waiting: ${Math.max(0, Math.ceil(early / 1000))}s of clock left`);
+  const wait = everyoneLocked ? 0 : early + 3000;
   if (wait > 0) { console.log(`    waiting ${Math.ceil(wait / 1000)}s for the clock`); await sleep(wait); }
   try {
     await teeOp.methods.closeUnit().accountsPartial({ authority: operator.publicKey, unit })
       .remainingAccounts([manifest, ...wallets.map((k) => p.bid(unit, k.publicKey))].map((pubkey) => ({ pubkey, isSigner: false, isWritable: false }))).rpc();
-    record("close_unit", true);
+    record(everyoneLocked && early > 0 ? "close_unit, before the clock, because everyone locked in" : "close_unit", true);
   } catch (e) { record("close_unit", false, msg(e)); logs(e); return finish(); }
   u = await (teeOp.account as any).unit.fetch(unit);
   console.log("    winner:", u.winner.toBase58(), "bid", Number(u.winningBid) / 1e6, "value $" + (u.value / 100).toFixed(2));

@@ -8,7 +8,7 @@
 //! | Layer | Instructions |
 //! |---|---|
 //! | Solana | `init_yard`, `add_item`, `create_unit`, `join_unit`, `start_unit` (locks the line and requests the VRF draw), `draw_callback`, `request_draw` (retry only), `delegate_unit`, `settle_bidder`, `settle_on_commit` (Magic Action), `claim_lot`, `reclaim_stalled`, `list_item`, `buy_item`, `cancel_listing`, `init_pool`, `consign`, `withdraw_consignment` |
-//! | Private rollup | `init_unit_permission`, `stock_unit`, `seal_manifest`, `place_bid`, `seal_bid`, `close_unit`, `commit_unit`, `commit_and_settle` (commit plus a Magic Action per bidder that pays them on Solana) |
+//! | Private rollup | `init_unit_permission`, `stock_unit`, `seal_manifest`, `place_bid`, `seal_bid`, `raise_bid`, `lock_in`, `close_unit`, `commit_unit`, `commit_and_settle` (commit plus a Magic Action per bidder that pays them on Solana) |
 //!
 //! ## How the contents stay hidden and still can't be rigged
 //!
@@ -475,10 +475,59 @@ pub mod lockup {
         write_account(&ctx.accounts.bid.to_account_info(), &bid)?;
 
         let unit = &mut ctx.accounts.unit;
+        let last_at = unit.seconds_in(Clock::get()?.unix_timestamp);
         unit.slots[index].has_bid = true;
+        unit.slots[index].set_tell(Tell { raises: 0, locked: false, last_at });
         unit.bid_count = unit.bid_count.checked_add(1).ok_or(LockupError::Overflow)?;
         // Deliberately does not log the amount.
         msg!("Bid {} sealed on unit {}", order, unit.unit_id);
+        Ok(())
+    }
+
+    /// Raise a sealed bid. The new amount stays as private as the first one; what the table
+    /// sees is only that this bidder raised, and when. A raise of one cent looks exactly like a
+    /// raise of a dollar, so a raise can be a bluff.
+    pub fn raise_bid(ctx: Context<RaiseBid>, amount: u64) -> Result<()> {
+        let unit = &ctx.accounts.unit;
+        require!(unit.status == UnitStatus::Bidding, LockupError::WrongStatus);
+        let now = Clock::get()?.unix_timestamp;
+        require!(now < unit.closes_at, LockupError::BiddingClosed);
+        let index = unit.slot_index(&ctx.accounts.bidder.key()).ok_or(LockupError::NotInLine)?;
+        let slot = unit.slots[index];
+        require!(slot.has_bid, LockupError::NoBidYet);
+        let mut tell = slot.tell();
+        require!(!tell.locked, LockupError::LockedIn);
+        require!(amount > ctx.accounts.bid.amount, LockupError::RaiseTooLow);
+        require!(amount <= slot.deposit, LockupError::BidAboveDeposit);
+
+        // A tie goes to whoever got to the amount first, so a raise gives up the earlier place.
+        let raised: u32 = unit.slots.iter().map(|s| if s.has_bid { s.tell().raises as u32 } else { 0 }).sum();
+        let bid = &mut ctx.accounts.bid;
+        bid.amount = amount;
+        bid.order = (MAX_BIDDERS as u32 + raised).min(u8::MAX as u32) as u8;
+
+        tell.raises = tell.raises.saturating_add(1);
+        tell.last_at = unit.seconds_in(now);
+        ctx.accounts.unit.slots[index].set_tell(tell);
+        // Deliberately does not log the amount.
+        msg!("Raise {} on unit {}", tell.raises, ctx.accounts.unit.unit_id);
+        Ok(())
+    }
+
+    /// Lock in: this bidder is done. When everyone in line has locked in, the door can open
+    /// without waiting for the clock.
+    pub fn lock_in(ctx: Context<LockIn>) -> Result<()> {
+        let unit = &mut ctx.accounts.unit;
+        require!(unit.status == UnitStatus::Bidding, LockupError::WrongStatus);
+        let now = Clock::get()?.unix_timestamp;
+        require!(now < unit.closes_at, LockupError::BiddingClosed);
+        let index = unit.slot_index(&ctx.accounts.bidder.key()).ok_or(LockupError::NotInLine)?;
+        require!(unit.slots[index].has_bid, LockupError::NoBidYet);
+        let mut tell = unit.slots[index].tell();
+        require!(!tell.locked, LockupError::LockedIn);
+        tell.locked = true;
+        tell.last_at = unit.seconds_in(now);
+        unit.slots[index].set_tell(tell);
         Ok(())
     }
 
@@ -520,10 +569,9 @@ pub mod lockup {
             let unit = &ctx.accounts.unit;
             require!(unit.status == UnitStatus::Bidding, LockupError::WrongStatus);
             require!(unit.stocked, LockupError::NotStocked);
-            // The door opens when the clock runs out, or as soon as everyone in line has bid:
-            // the line is locked by now, so nobody is left who could still bid.
-            let everyone_bid = unit.bid_count as usize == unit.slots.len();
-            require!(everyone_bid || Clock::get()?.unix_timestamp >= unit.closes_at, LockupError::BiddingStillOpen);
+            // The door opens when the clock runs out, or as soon as everyone in line has bid
+            // and locked in: after that nobody is left who could change the outcome.
+            require!(unit.everyone_locked() || Clock::get()?.unix_timestamp >= unit.closes_at, LockupError::BiddingStillOpen);
             require_eq!(
                 ctx.remaining_accounts.len(),
                 unit.bid_count as usize + 1,
@@ -1235,6 +1283,22 @@ pub struct PlaceBid<'info> {
     /// CHECK: created here as an ephemeral account.
     #[account(mut, eph, seeds = [BID_SEED, unit.key().as_ref(), bidder.key().as_ref()], bump)]
     pub bid: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct RaiseBid<'info> {
+    pub bidder: Signer<'info>,
+    #[account(mut, seeds = [UNIT_SEED, unit.yard.as_ref(), &unit.unit_id.to_le_bytes()], bump = unit.bump)]
+    pub unit: Box<Account<'info, Unit>>,
+    #[account(mut, seeds = [BID_SEED, unit.key().as_ref(), bidder.key().as_ref()], bump = bid.bump, constraint = bid.unit == unit.key() @ LockupError::InvalidAccount, constraint = bid.bidder == bidder.key() @ LockupError::Unauthorized)]
+    pub bid: Box<Account<'info, Bid>>,
+}
+
+#[derive(Accounts)]
+pub struct LockIn<'info> {
+    pub bidder: Signer<'info>,
+    #[account(mut, seeds = [UNIT_SEED, unit.yard.as_ref(), &unit.unit_id.to_le_bytes()], bump = unit.bump)]
+    pub unit: Box<Account<'info, Unit>>,
 }
 
 #[derive(Accounts)]

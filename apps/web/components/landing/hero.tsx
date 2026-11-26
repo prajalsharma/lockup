@@ -26,7 +26,7 @@ export function Hero() {
             <span className="rise block" style={{ ["--i" as string]: 3 }}><span className="hl">door.</span></span>
           </h1>
           <p className="rise mt-7 max-w-[520px] text-[18px] leading-[1.5] text-ink-2" style={{ ["--i" as string]: 4 }}>
-            Every unit holds tokens you can't see. Read three clues, place a bid nobody else can read, and the highest bid rolls the door up.
+            Every unit holds tokens you can't see. Read three clues, seal a bid nobody else can read, raise it while the table watches, and the highest bid rolls the door up.
           </p>
           <div className="rise mt-8 flex flex-wrap gap-3" style={{ ["--i" as string]: 5 }}>
             <Link href="/yard" className="btn btn-primary">Enter the yard <span className="arrow" aria-hidden>→</span></Link>

@@ -57,6 +57,9 @@ twelve items are game tokens standing in for real goods; nothing here is backed 
 - **Best pickers.** A leaderboard on the yard page, ranked by how far ahead each wallet is.
 - **Look through the keyhole.** During bidding, anyone can ask the private rollup and Solana for another
   bidder's sealed bid and see what comes back.
+- **A live table.** A sealed bid can be raised as often as you like until you lock in. Everyone sees who
+  raised and when, within half a second, and never how much, so a one-cent raise is a bluff that looks like a
+  big one. House bidders raise by a fixed, published rule. The door opens the moment everyone has locked in.
 - **It moves like a game.** You slide a bolt to seal a bid, the sealed bids decode when the door opens,
   your balance rolls as the payout lands, and a slip prints what you put in, paid and got back.
 

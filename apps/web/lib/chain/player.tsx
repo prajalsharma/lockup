@@ -58,6 +58,8 @@ interface PlayerState {
   busy: string | null;
   error: string | null;
   myBids: Record<number, number>;
+  /** Milliseconds from sending to confirmed for each move this wallet made on the private rollup, oldest first. */
+  moves: number[];
   openPicker(): void;
   closePicker(): void;
   /** True when email / Google sign-in is configured. */
@@ -68,6 +70,10 @@ interface PlayerState {
   disconnect(): void;
   join(unitId: number, deposit: number): Promise<boolean>;
   bid(unitId: number, amount: number): Promise<boolean>;
+  /** Raise a sealed bid. Only the fact that you raised is public. */
+  raise(unitId: number, amount: number): Promise<boolean>;
+  /** Lock in: no more raises. The door opens once everyone has. */
+  lockIn(unitId: number): Promise<boolean>;
   topUp(): Promise<boolean>;
   /** Put items up for sale at a price each. */
   sell(mint: string, price: number, qty: number): Promise<boolean>;
@@ -125,6 +131,7 @@ function Inner({ children }: { children: React.ReactNode }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [myBids, setMyBids] = useState<Record<number, number>>({});
+  const [moves, setMoves] = useState<number[]>([]);
   const connection = useMemo(() => new Connection(RPC, "confirmed"), []);
   const teeConn = useRef<{ who: string; conn: Connection } | null>(null);
 
@@ -194,7 +201,21 @@ function Inner({ children }: { children: React.ReactNode }) {
     tx.feePayer = s.publicKey;
     tx.recentBlockhash = blockhash;
     const signed = await s.signTransaction(tx);
+    if (!conn.rpcEndpoint.startsWith(TEE_RPC)) {
+      const sig = await conn.sendRawTransaction(signed.serialize());
+      await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+      return sig;
+    }
+    // On the private rollup a move confirms far faster than web3's confirm helper checks for it,
+    // so ask for the status directly. The time from sending to confirmed is kept and shown.
+    const t0 = performance.now();
     const sig = await conn.sendRawTransaction(signed.serialize());
+    for (let i = 0; i < 120; i++) {
+      const st = (await conn.getSignatureStatuses([sig])).value[0];
+      if (st?.err) throw new Error(`The rollup refused it: ${JSON.stringify(st.err)}`);
+      if (st?.confirmationStatus) { setMoves((m) => [...m, Math.round(performance.now() - t0)]); return sig; }
+      await new Promise((r) => setTimeout(r, 40));
+    }
     await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
     return sig;
   }, []);
@@ -252,15 +273,42 @@ function Inner({ children }: { children: React.ReactNode }) {
     await send(s, tx, connection);
   }), [run, starter, connection, send]);
 
-  const bid = useCallback((unitId: number, amount: number) => run("Opening the private rollup", async (s) => {
-    const { BN, program, mb } = await chainKit();
+  /** This wallet's own connection to the private rollup. One signed message, then reused. */
+  const rollup = useCallback(async (s: any, mb: any): Promise<Connection> => {
     const key = s.publicKey.toBase58();
     if (teeConn.current?.who !== key) {
       // One signed message proves to the rollup who is asking. It is not a transaction.
       const auth = await mb.getAuthToken(TEE_RPC, s.publicKey, (m: Uint8Array) => s.signMessage(m));
       teeConn.current = { who: key, conn: new Connection(`${TEE_RPC}?token=${auth.token}`, { commitment: "confirmed" }) };
     }
-    const conn = teeConn.current.conn;
+    return teeConn.current!.conn;
+  }, []);
+  const noteBid = useCallback((unitId: number, amount: number) => setMyBids((m) => {
+    const n = { ...m, [unitId]: amount };
+    try { sessionStorage.setItem("lockup.my-bids", JSON.stringify(n)); } catch { /* ignore */ }
+    return n;
+  }), []);
+
+  const raise = useCallback((unitId: number, amount: number) => run("Raising your bid", async (s) => {
+    const { BN, program, mb } = await chainKit();
+    const conn = await rollup(s, mb);
+    const unit = unitPda(unitId);
+    const tx = new Transaction().add(await program(conn, s.publicKey).methods.raiseBid(new BN(Math.round(amount * USD)))
+      .accountsPartial({ bidder: s.publicKey, unit, bid: bidPda(unit, s.publicKey) }).instruction());
+    await send(s, tx, conn);
+    noteBid(unitId, amount);
+  }), [run, send, rollup, noteBid]);
+
+  const lockIn = useCallback((unitId: number) => run("Locking in", async (s) => {
+    const { program, mb } = await chainKit();
+    const conn = await rollup(s, mb);
+    const tx = new Transaction().add(await program(conn, s.publicKey).methods.lockIn().accountsPartial({ bidder: s.publicKey, unit: unitPda(unitId) }).instruction());
+    await send(s, tx, conn);
+  }), [run, send, rollup]);
+
+  const bid = useCallback((unitId: number, amount: number) => run("Opening the private rollup", async (s) => {
+    const { BN, program, mb } = await chainKit();
+    const conn = await rollup(s, mb);
     const unit = unitPda(unitId);
     const bidKey = bidPda(unit, s.publicKey);
     const p = program(conn, s.publicKey);
@@ -271,12 +319,8 @@ function Inner({ children }: { children: React.ReactNode }) {
     );
     setBusy("Sealing your bid");
     await send(s, tx, conn);
-    setMyBids((m) => {
-      const n = { ...m, [unitId]: amount };
-      try { sessionStorage.setItem("lockup.my-bids", JSON.stringify(n)); } catch { /* ignore */ }
-      return n;
-    });
-  }), [run, send]);
+    noteBid(unitId, amount);
+  }), [run, send, rollup, noteBid]);
 
   const sell = useCallback((mintStr: string, price: number, qty: number) => run("Listing it for sale", async (s) => {
     const { BN, program } = await chainKit();
@@ -361,7 +405,7 @@ function Inner({ children }: { children: React.ReactNode }) {
 
   const value: PlayerState = {
     ready: ready && (mode !== "email" || (email ? email.ready : !PRIVY_APP_ID)), address: who, walletName: signer?.name ?? null, walletIcon: signer?.icon ?? null, isQuick: signer?.kind === "quick",
-    connecting: adapter.connecting, sol, dollars, choices, pickerOpen, busy, error, myBids,
+    connecting: adapter.connecting, sol, dollars, choices, pickerOpen, busy, error, myBids, moves,
     openPicker: () => { setError(null); setPickerOpen(true); },
     closePicker: () => setPickerOpen(false),
     emailLogin: !!PRIVY_APP_ID,
@@ -380,7 +424,7 @@ function Inner({ children }: { children: React.ReactNode }) {
       if (mode === "email") void email?.logout().catch(() => undefined);
       remember(null);
     },
-    join, bid, topUp, sell, unlist, buy, consign, takeBack,
+    join, bid, raise, lockIn, topUp, sell, unlist, buy, consign, takeBack,
     refresh: () => { if (signer) void refreshFor(signer.publicKey); },
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
