@@ -13,7 +13,7 @@ trips to devnet, and the unit page shows both the figure for your own moves and 
 player's move is pushed to your screen over the rollup's websocket: about 0.8 seconds from their click in a
 two-browser test.
 
-- **Play:** https://playlockup.vercel.app (also at https://lockup-seven.vercel.app)
+- **Play:** https://playlockup.vercel.app
 - **Program (devnet):** [`2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR`](https://explorer.solana.com/address/2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR?cluster=devnet)
 - **How it works and what is trusted:** [`docs/CONTRACTS.md`](docs/CONTRACTS.md)
 
@@ -151,5 +151,4 @@ Set `NEXT_PUBLIC_PRIVY_APP_ID` to add email and Google sign-in (Privy) to the wa
 - `docs/screens` screenshots
 
 The delegation, permission and commit patterns follow MagicBlock's sealed-auction example and an
-earlier MagicBlock project of mine. Anton is used under the SIL Open Font License. The rolling digits, decoding text,
-slide-to-seal bolt and win burst are adapted from [EasyUI](https://github.com/Surajmaurya1/easyui) (MIT, © 2026 Suraj Maurya).
+earlier MagicBlock project of mine. Anton is used under the SIL Open Font License.
