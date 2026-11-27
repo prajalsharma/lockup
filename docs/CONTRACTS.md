@@ -16,12 +16,17 @@ Pins: `anchor-lang 1.0.2`, `ephemeral-rollups-sdk 0.16.2` (features `anchor`, `a
    It refuses a unit that has no draw.
 5. **Stock.** Inside the rollup, `stock_unit(salt)` derives the contents from
    `sha256(randomness, salt, unit)`, writes them to a private manifest and posts three clues.
-6. **Bid, raise, lock in.** `place_bid` + `seal_bid` create a bid only its bidder can read.
+6. **Private clue.** `deal_hint` + `seal_hint` give each bidder one more true statement about the unit
+   that is not on the door, taken from the sealed manifest inside the rollup and written to a `Hint`
+   account only that bidder can read. Bidders in even and odd places get different ones. Only the
+   operator can call it, once per bidder; the operator cannot read the result.
+   **Bid, raise, lock in.** `place_bid` + `seal_bid` create a bid only its bidder can read.
    `raise_bid(amount)` replaces the amount with a higher one, as often as the bidder likes, never above
    the deposit. `lock_in` ends that bidder's round. The amount lives only in the sealed bid account.
-   What the unit shows publicly for each bidder is a count of raises, the second of their last move and
-   whether they locked in; a raise of one cent is indistinguishable from a large one. That public part
-   is kept in the slot's `bid` field, which holds the amount only after the unit closes.
+   What the unit shows publicly for each bidder is a `Tell`: a count of raises, the second of their last
+   move, whether they locked in and whether their private clue was dealt. A raise of one cent is
+   indistinguishable from a large one. The unit keeps one `Tell` per slot in its own list; the slot's
+   `bid` field stays zero until the unit closes.
 7. **Close.** Once every bidder has locked in, or after the clock, `close_unit` reads every bid, picks
    the highest (ties go to whoever reached that amount first; a raise gives up the earlier place) and writes bids, winner, contents and salt into the unit. `commit_unit` returns it to Solana.
 8. **Settle.** The commit is sent with `commit_and_settle`, which schedules one Magic Action per bidder.
@@ -45,9 +50,12 @@ unit account over the rollup's websocket, so each move arrives as it lands; visi
 login get the same public fields from `/api/pulse/[id]` about three times a second. Neither path can
 carry an amount, because the unit account does not hold one until it closes.
 
-House bidders follow one published rule, run by the keeper: open at 70% of the limit the three clues
-suggest, raise once to that limit after a player has bid, and lock in when every player has or with
-12 seconds left.
+House bidders follow one published rule, run by the keeper, and get no private clue. Each has a limit
+worked out from the three clues on the door and a plan fixed by the unit's address: an opening bid
+between 55% and 85% of the limit and one to three steps up to it. It opens at the first amount and
+answers each move a player makes with the next step until it reaches the limit, then locks in. So a
+house bidder that locks in early has nothing left, and one that keeps answering still has room. When
+every player has locked in, or with 12 seconds left, it makes any step it still owes and locks in.
 
 ## Resale
 
@@ -110,6 +118,7 @@ the bid currency's smallest unit. This is the price record on the Market page.
 | `Manifest` | private rollup | operator | the contents, until close |
 | `Bid` | private rollup | its bidder only | the amount |
 | `Listing` + stall | Solana | anyone | seller, item, price each, quantity; the stall holds the items |
+| `Hint` | private rollup | its bidder | one bidder's private clue |
 | `Pool` | Solana | anyone | one per item: players' items waiting, and what the item has sold for inside units and on the market |
 | `Consignment` | Solana | anyone | one player's items of one kind handed to the yard: waiting, sold, earned |
 
@@ -182,7 +191,7 @@ every item consigned by a test seller so the next round pays a player.
 `pnpm round` drives a whole round with two wallets and asserts every step, including the privacy
 reads and exact settlement amounts. It checks that each lot releases exactly its share of the bid, that
 the shares add up to the winning bid, that a claim which skips a waiting consignment is refused, and
-that a consigned item's share cannot be sent to anyone but its seller. On the rollup it checks raising and locking in: a raise below the current bid, above the deposit, on someone else's bid or after locking in is refused; the table shows the raise counts and no amount; the other bidder still cannot read a raised bid; the door stays shut while anyone has not locked in and opens before the clock once everyone has. The hosted site has also been played end to end with the in-browser
+that a consigned item's share cannot be sent to anyone but its seller. On the rollup it checks raising and locking in: a raise below the current bid, above the deposit, on someone else's bid or after locking in is refused; the table shows the raise counts and no amount; the other bidder still cannot read a raised bid; the door stays shut while anyone has not locked in and opens before the clock once everyone has. It checks the private clue too: a player cannot deal one, each bidder reads their own and it is not one of the three on the door, two bidders get different ones, neither the other bidder nor the operator can read it, it does not exist on Solana, and a second one for the same bidder is refused. The hosted site has also been played end to end with the in-browser
 quick wallet. Wallet extensions connect through Solana Wallet Adapter. That path has been played end to end on the
 hosted site with an injected wallet implementing the Wallet Standard interface (connect, signTransaction,
 signMessage); a real Phantom, Solflare or Backpack install has not been driven. Email sign-in through

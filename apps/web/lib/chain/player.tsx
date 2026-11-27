@@ -15,7 +15,7 @@ import dynamic from "next/dynamic";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { EmailWalletCtx, PRIVY_APP_ID, type EmailWallet } from "./email-wallet";
 import type { Pulse } from "./types";
-import { BID_MINT, RPC, TEE_RPC, USD, VAULT, YARD, bidPda, bidderPda, consignPda, listingPda, poolPda, pulseOf, sleep, stallPda, unitPda, warehousePda } from "./shared";
+import { BID_MINT, RPC, TEE_RPC, USD, VAULT, YARD, bidPda, bidderPda, consignPda, hintPda, listingPda, poolPda, pulseOf, sleep, stallPda, unitPda, warehousePda } from "./shared";
 
 interface Signer {
   kind: "quick" | "extension" | "email";
@@ -59,6 +59,8 @@ interface PlayerState {
   busy: string | null;
   error: string | null;
   myBids: Record<number, number>;
+  /** Milliseconds one request to the private rollup and its answer last took from this browser. */
+  trip: number | null;
   /** Milliseconds from sending to confirmed for each move this wallet made on the private rollup, oldest first. */
   moves: number[];
   openPicker(): void;
@@ -73,6 +75,10 @@ interface PlayerState {
   bid(unitId: number, amount: number): Promise<boolean>;
   /** Raise a sealed bid. Only the fact that you raised is public. */
   raise(unitId: number, amount: number): Promise<boolean>;
+  /** Read this wallet's private clue for a unit from the rollup. It lands in `hints`. */
+  readHint(unitId: number): Promise<boolean>;
+  /** Private clues this wallet has read, by unit. */
+  hints: Record<number, { kind: number; arg: number }>;
   /** Lock in: no more raises. The door opens once everyone has. */
   lockIn(unitId: number): Promise<boolean>;
   /** The unit's table read straight from the private rollup over this wallet's own connection. Null until the wallet has one. */
@@ -139,6 +145,8 @@ function Inner({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [myBids, setMyBids] = useState<Record<number, number>>({});
   const [moves, setMoves] = useState<number[]>([]);
+  const [trip, setTrip] = useState<number | null>(null);
+  const [hints, setHints] = useState<Record<number, { kind: number; arg: number }>>({});
   // The wallet that currently holds a logged-in connection to the private rollup, if any.
   const [linked, setLinked] = useState<string | null>(null);
   const connection = useMemo(() => new Connection(RPC, "confirmed"), []);
@@ -220,7 +228,10 @@ function Inner({ children }: { children: React.ReactNode }) {
     const t0 = performance.now();
     const sig = await conn.sendRawTransaction(signed.serialize());
     for (let i = 0; i < 120; i++) {
+      const asked = performance.now();
       const st = (await conn.getSignatureStatuses([sig])).value[0];
+      // One request and its answer: what the network alone costs from this browser.
+      if (i === 0) setTrip(Math.round(performance.now() - asked));
       if (st?.err) throw new Error(`The rollup refused it: ${JSON.stringify(st.err)}`);
       if (st?.confirmationStatus) { setMoves((m) => [...m, Math.round(performance.now() - t0)]); return sig; }
       await new Promise((r) => setTimeout(r, 40));
@@ -319,6 +330,22 @@ function Inner({ children }: { children: React.ReactNode }) {
     });
     return () => { off = true; if (sub !== null) void c.conn.removeAccountChangeListener(sub).catch(() => undefined); };
   }, [who]);
+
+  // Kept apart from the other actions: a slow read must never hold up a bid.
+  const readHint = useCallback(async (unitId: number) => {
+    const s = signer;
+    if (!s) return false;
+    try {
+      const { program, mb } = await chainKit();
+      const read = (async () => {
+        const conn = await rollup(s, mb);
+        return (program(conn, s.publicKey).account as any).hint.fetch(hintPda(unitPda(unitId), s.publicKey), "processed");
+      })();
+      const h: any = await Promise.race([read, new Promise((_, no) => setTimeout(() => no(new Error("timed out")), 8000))]);
+      setHints((m) => ({ ...m, [unitId]: { kind: h.clue.kind, arg: h.clue.arg } }));
+      return true;
+    } catch { return false; }
+  }, [signer, rollup]);
 
   const raise = useCallback((unitId: number, amount: number) => run("Raising your bid", async (s) => {
     const { BN, program, mb } = await chainKit();
@@ -436,7 +463,7 @@ function Inner({ children }: { children: React.ReactNode }) {
 
   const value: PlayerState = {
     ready: ready && (mode !== "email" || (email ? email.ready : !PRIVY_APP_ID)), address: who, walletName: signer?.name ?? null, walletIcon: signer?.icon ?? null, isQuick: signer?.kind === "quick",
-    connecting: adapter.connecting, sol, dollars, choices, pickerOpen, busy, error, myBids, moves,
+    connecting: adapter.connecting, sol, dollars, choices, pickerOpen, busy, error, myBids, moves, trip,
     openPicker: () => { setError(null); setPickerOpen(true); },
     closePicker: () => setPickerOpen(false),
     emailLogin: !!PRIVY_APP_ID,
@@ -455,7 +482,7 @@ function Inner({ children }: { children: React.ReactNode }) {
       if (mode === "email") void email?.logout().catch(() => undefined);
       remember(null);
     },
-    join, bid, raise, lockIn, table, watch, linked: !!who && linked === who, topUp, sell, unlist, buy, consign, takeBack,
+    join, bid, raise, lockIn, readHint, hints, table, watch, linked: !!who && linked === who, topUp, sell, unlist, buy, consign, takeBack,
     refresh: () => { if (signer) void refreshFor(signer.publicKey); },
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

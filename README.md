@@ -8,9 +8,10 @@ the winner keeps the haul or sells it piece by piece.
 Bids and contents stay sealed inside MagicBlock's Private Ephemeral Rollup until every bid is in or the clock runs out,
 and MagicBlock VRF decides what each unit holds. After the result commits, MagicBlock pays every bidder on
 Solana by Magic Action, about 6 seconds after the commit is sent. A sealed bid, a raise or a lock-in confirms on the rollup in about half a second
-(medians of 380 to 700 ms across live rounds, timed in the browser from sending to confirmed, network round trip
-included), and the unit page shows the figure for your own moves. Another player's move is pushed to your screen
-over the rollup's websocket: 0.8 to 2.3 seconds from their click in a two-browser test.
+(medians of 200 to 700 ms across live rounds, timed in the browser from sending to confirmed; that is two network
+trips to devnet, and the unit page shows both the figure for your own moves and what one trip costs). Another
+player's move is pushed to your screen over the rollup's websocket: about 0.8 seconds from their click in a
+two-browser test.
 
 - **Play:** https://lockup-seven.vercel.app
 - **Program (devnet):** [`2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR`](https://explorer.solana.com/address/2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR?cluster=devnet)
@@ -61,7 +62,10 @@ twelve items are game tokens standing in for real goods; nothing here is backed 
   bidder's sealed bid and see what comes back.
 - **A live table.** A sealed bid can be raised as often as you like until you lock in. Everyone sees who
   raised and when, within half a second, and never how much, so a one-cent raise is a bluff that looks like a
-  big one. House bidders raise by a fixed, published rule. The door opens the moment everyone has locked in.
+  big one. House bidders answer your moves by a fixed, published rule until they hit their limit, so one that locks in
+  early has nothing left. The door opens the moment everyone has locked in.
+- **A clue only you can read.** Each player is dealt a fourth true clue inside the private rollup, sealed to their
+  wallet. The player next to you gets a different one, and the operator cannot read either.
 - **It moves like a game.** You slide a bolt to seal a bid, the sealed bids decode when the door opens,
   your balance rolls as the payout lands, and a slip prints what you put in, paid and got back.
 

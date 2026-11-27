@@ -211,8 +211,32 @@ async function main() {
       return want.test(text);
     }
   };
-  const tellOf = (bid: any) => ({ raises: bid.maskn(16).toNumber(), locked: bid.testn(16), lastAt: bid.shrn(32).toNumber() });
-  const seat = async (k: Keypair) => { const x = await (teeOp.account as any).unit.fetch(unit); return x.slots.find((sl: any) => sl.bidder.equals(k.publicKey)); };
+  const none = { raises: 0, locked: false, hinted: false, lastAt: 0 };
+  const seat = async (k: Keypair) => { const x = await (teeOp.account as any).unit.fetch(unit, "processed"); return x.tells[x.slots.findIndex((sl: any) => sl.bidder.equals(k.publicKey))] ?? none; };
+  const named = (name: string) => new RegExp(`${name}|"Custom":${(idl as any).errors.find((e: any) => e.name === name)?.code}\\b`);
+
+  // One private clue each, dealt from the sealed manifest.
+  const hintKey = (k: Keypair) => PublicKey.findProgramAddressSync([Buffer.from("hint"), unit.toBuffer(), k.publicKey.toBuffer()], program.programId)[0];
+  const deal = async (i: number, by: any = teeOp, authority: Keypair = operator) => {
+    const hint = hintKey(wallets[i]);
+    const seal = await by.methods.sealHint().accountsPartial({ unit, hint, permission: permissionPdaFromAccount(hint), ...perm }).instruction();
+    return by.methods.dealHint().accountsPartial({ authority: authority.publicKey, unit, manifest, bidder: wallets[i].publicKey, hint }).postInstructions([seal]);
+  };
+  try {
+    record("a player cannot deal a private clue", await refusedOnRollup(await deal(0, teeBidders[0], wallets[0]), /Unauthorized|"Custom":(2001|6\d\d\d)\b|ConstraintHasOne/));
+    for (const i of [0, 1]) await (await deal(i)).rpc();
+    const mineA: any = await (teeBidders[0].account as any).hint.fetch(hintKey(wallets[0]), "processed");
+    const mineB: any = await (teeBidders[1].account as any).hint.fetch(hintKey(wallets[1]), "processed");
+    const onDoor = (c: any) => (u.clues as any[]).some((d: any) => d.kind === c.kind && d.arg === c.arg);
+    u = await (teeOp.account as any).unit.fetch(unit, "processed");
+    record("each bidder reads their own private clue, and it is not one on the door", !onDoor(mineA.clue) && !onDoor(mineB.clue), `A kind ${mineA.clue.kind}/${mineA.clue.arg}, B kind ${mineB.clue.kind}/${mineB.clue.arg}`);
+    record("the two bidders were dealt different clues", mineA.clue.kind !== mineB.clue.kind || mineA.clue.arg !== mineB.clue.arg);
+    record("B cannot read A's private clue", !(await canRead(teeBidders[1], "bid", hintKey(wallets[0]))));
+    record("the operator cannot read A's private clue", !(await canRead(teeOp, "bid", hintKey(wallets[0]))));
+    record("a private clue is not visible on Solana", !(await connection.getAccountInfo(hintKey(wallets[0]))));
+    record("a second private clue for the same bidder is refused", await refusedOnRollup(await deal(0), named("AlreadyHinted")));
+    record("the table shows that both were dealt one", (await seat(wallets[0])).hinted && (await seat(wallets[1])).hinted);
+  } catch (e) { record("private clues", false, msg(e)); logs(e); }
   const raiseOf = (i: number, amount: bigint, who = i) => teeBidders[who].methods.raiseBid(new BN(amount.toString())).accountsPartial({ bidder: wallets[who].publicKey, unit, bid: p.bid(unit, wallets[i].publicKey) });
   const lockOf = (i: number) => teeBidders[i].methods.lockIn().accountsPartial({ bidder: wallets[i].publicKey, unit });
   try {
@@ -226,7 +250,7 @@ async function main() {
       await raiseOf(i, PLAN[i].bid).rpc();
       times.push(Date.now() - t0);
     }
-    const a = tellOf((await seat(wallets[0])).bid), b = tellOf((await seat(wallets[1])).bid);
+    const a = await seat(wallets[0]), b = await seat(wallets[1]);
     record("the table sees who raised and how often, and no amount", a.raises === 2 && b.raises === 1 && !a.locked && !b.locked, `A raised ${a.raises}×, B ${b.raises}×; raises confirmed in ${times.join(", ")} ms`);
     const own: any = await (teeBidders[0].account as any).bid.fetch(bidA);
     record("A reads its own raised bid", BigInt(own.amount.toString()) === PLAN[0].bid, `$${Number(PLAN[0].bid) / 1e6}`);
@@ -237,13 +261,13 @@ async function main() {
     record("a locked-in bid cannot be raised", await refusedOnRollup(raiseOf(0, PLAN[0].bid + CENT), /LockedIn/));
     record("locking in twice is refused", await refusedOnRollup(lockOf(0), /LockedIn/));
     await lockOf(1).rpc();
-    const la = tellOf((await seat(wallets[0])).bid), lb = tellOf((await seat(wallets[1])).bid);
+    const la = await seat(wallets[0]), lb = await seat(wallets[1]);
     record("both bidders show as locked in", la.locked && lb.locked && la.raises === 2);
   } catch (e) { record("raise and lock in", false, msg(e)); logs(e); }
 
   head("Private rollup: close and commit");
   u = await (teeOp.account as any).unit.fetch(unit);
-  const everyoneLocked = u.slots.every((sl: any) => sl.hasBid && tellOf(sl.bid).locked);
+  const everyoneLocked = u.slots.every((sl: any, i: number) => sl.hasBid && !!u.tells[i]?.locked);
   const early = Number(u.closesAt) * 1000 - Date.now();
   if (everyoneLocked) console.log(`    everyone locked in, so no waiting: ${Math.max(0, Math.ceil(early / 1000))}s of clock left`);
   const wait = everyoneLocked ? 0 : early + 3000;

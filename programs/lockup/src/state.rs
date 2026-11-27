@@ -53,31 +53,22 @@ pub struct Slot {
     /// Escrowed on Solana. Public. Caps the bid.
     pub deposit: u64,
     pub has_bid: bool,
-    /// The bid amount, but only once the unit is closed. While bidding is open the amount stays
-    /// in the sealed `Bid` account, and this field carries what the table is allowed to see of
-    /// the bidder: how many times they raised, when they last acted, and whether they locked in.
-    /// `close_unit` overwrites it with the amount.
+    /// Zero until the unit is closed. While bids are sealed the amount exists only in the
+    /// bidder's private `Bid` account.
     pub bid: u64,
 }
 
 /// What everyone at the table can see of a bidder while bids are sealed. Never an amount.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace, Default)]
 pub struct Tell {
     /// How many times the bidder has raised their sealed bid.
     pub raises: u16,
     /// Locked in: this bidder is done, and cannot raise again.
     pub locked: bool,
+    /// This bidder has been dealt their private clue.
+    pub hinted: bool,
     /// Seconds after the bidding clock started at which they last acted.
     pub last_at: u32,
-}
-
-impl Slot {
-    pub fn tell(&self) -> Tell {
-        Tell { raises: self.bid as u16, locked: self.bid & (1 << 16) != 0, last_at: (self.bid >> 32) as u32 }
-    }
-    pub fn set_tell(&mut self, t: Tell) {
-        self.bid = t.raises as u64 | (t.locked as u64) << 16 | (t.last_at as u64) << 32;
-    }
 }
 
 #[account]
@@ -125,6 +116,10 @@ pub struct Unit {
     /// Bit i set = lot i has been paid out to the winner.
     pub claimed_mask: u8,
     pub bump: u8,
+    /// One per slot, in line order: the public side of each bidder's sealed play. Empty on
+    /// units from before raising existed, and until the first move.
+    #[max_len(MAX_BIDDERS)]
+    pub tells: Vec<Tell>,
 }
 
 impl Unit {
@@ -135,9 +130,20 @@ impl Unit {
     pub fn seconds_in(&self, now: i64) -> u32 {
         now.saturating_sub(self.closes_at.saturating_sub(self.duration)).clamp(0, u32::MAX as i64) as u32
     }
+    /// The public side of slot `index`'s play.
+    pub fn tell(&self, index: usize) -> Tell {
+        self.tells.get(index).copied().unwrap_or_default()
+    }
+    /// The same, to write to. Grows the list to one entry per slot the first time it is needed.
+    pub fn tell_mut(&mut self, index: usize) -> &mut Tell {
+        if self.tells.len() < self.slots.len() {
+            self.tells.resize(self.slots.len(), Tell::default());
+        }
+        &mut self.tells[index]
+    }
     /// True once nobody in line can change the outcome: everyone has bid and locked in.
     pub fn everyone_locked(&self) -> bool {
-        !self.slots.is_empty() && self.slots.iter().all(|s| s.has_bid && s.tell().locked)
+        !self.slots.is_empty() && self.slots.iter().enumerate().all(|(i, s)| s.has_bid && self.tell(i).locked)
     }
 }
 
@@ -175,6 +181,18 @@ pub struct Manifest {
     pub lots: Vec<Lot>,
     pub value: u32,
     pub salt: [u8; 32],
+    pub bump: u8,
+    /// Two true clues that are not on the door. `deal_hint` gives each bidder one of them.
+    pub spare: [Clue; 2],
+}
+
+/// One bidder's private clue. Exists only on the private rollup; only that bidder can read it.
+#[account]
+#[derive(InitSpace)]
+pub struct Hint {
+    pub unit: Pubkey,
+    pub bidder: Pubkey,
+    pub clue: Clue,
     pub bump: u8,
 }
 

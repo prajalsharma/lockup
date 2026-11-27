@@ -1066,6 +1066,123 @@
       ]
     },
     {
+      "name": "deal_hint",
+      "docs": [
+        "Deal one bidder their private clue: a true statement about the unit that is not on the",
+        "door, taken from the sealed manifest. Bidders in even and odd places get different ones.",
+        "Send `seal_hint` in the same transaction so only that bidder can read it."
+      ],
+      "discriminator": [
+        28,
+        37,
+        10,
+        37,
+        67,
+        171,
+        142,
+        50
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "unit"
+          ]
+        },
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit.yard",
+                "account": "Unit"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "manifest",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  110,
+                  105,
+                  102,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bidder"
+        },
+        {
+          "name": "hint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              },
+              {
+                "kind": "account",
+                "path": "bidder"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "address": "MagicVau1t999999999999999999999999999999999"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "delegate_unit",
       "docs": [
         "Hand the unit to the private rollup's validator for the bidding phase."
@@ -2588,6 +2705,156 @@
       "args": []
     },
     {
+      "name": "seal_hint",
+      "docs": [
+        "Make a private clue private: only its bidder can read it. Not even the operator."
+      ],
+      "discriminator": [
+        39,
+        108,
+        16,
+        205,
+        239,
+        246,
+        201,
+        144
+      ],
+      "accounts": [
+        {
+          "name": "unit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  110,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit.yard",
+                "account": "Unit"
+              },
+              {
+                "kind": "account",
+                "path": "unit.unit_id",
+                "account": "Unit"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "unit"
+              },
+              {
+                "kind": "account",
+                "path": "hint.bidder",
+                "account": "Hint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "permission",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  101,
+                  114,
+                  109,
+                  105,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110,
+                  58
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "hint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                136,
+                161,
+                10,
+                196,
+                33,
+                152,
+                1,
+                214,
+                246,
+                106,
+                29,
+                60,
+                6,
+                152,
+                192,
+                102,
+                169,
+                175,
+                212,
+                217,
+                180,
+                252,
+                231,
+                71,
+                151,
+                141,
+                209,
+                5,
+                168,
+                212,
+                103,
+                82
+              ]
+            }
+          }
+        },
+        {
+          "name": "permission_program",
+          "address": "ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1"
+        },
+        {
+          "name": "ephemeral_vault",
+          "writable": true,
+          "address": "MagicVau1t999999999999999999999999999999999"
+        },
+        {
+          "name": "magic_program",
+          "address": "Magic11111111111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "seal_manifest",
       "docs": [
         "Make the manifest private: only the operator, who already knows the salt, can read it."
@@ -3389,6 +3656,19 @@
       ]
     },
     {
+      "name": "Hint",
+      "discriminator": [
+        13,
+        248,
+        123,
+        185,
+        177,
+        108,
+        254,
+        150
+      ]
+    },
+    {
       "name": "Listing",
       "discriminator": [
         218,
@@ -3654,6 +3934,11 @@
       "code": 6039,
       "name": "NoBidYet",
       "msg": "Place a bid before you raise or lock in"
+    },
+    {
+      "code": 6040,
+      "name": "AlreadyHinted",
+      "msg": "This bidder already has their private clue"
     }
   ],
   "types": [
@@ -3782,6 +4067,37 @@
           {
             "name": "earned",
             "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Hint",
+      "docs": [
+        "One bidder's private clue. Exists only on the private rollup; only that bidder can read it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "unit",
+            "type": "pubkey"
+          },
+          {
+            "name": "bidder",
+            "type": "pubkey"
+          },
+          {
+            "name": "clue",
+            "type": {
+              "defined": {
+                "name": "Clue"
+              }
+            }
           },
           {
             "name": "bump",
@@ -3949,6 +4265,22 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "spare",
+            "docs": [
+              "Two true clues that are not on the door. `deal_hint` gives each bidder one of them."
+            ],
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "Clue"
+                  }
+                },
+                2
+              ]
+            }
           }
         ]
       }
@@ -4038,12 +4370,49 @@
           {
             "name": "bid",
             "docs": [
-              "The bid amount, but only once the unit is closed. While bidding is open the amount stays",
-              "in the sealed `Bid` account, and this field carries what the table is allowed to see of",
-              "the bidder: how many times they raised, when they last acted, and whether they locked in.",
-              "`close_unit` overwrites it with the amount."
+              "Zero until the unit is closed. While bids are sealed the amount exists only in the",
+              "bidder's private `Bid` account."
             ],
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Tell",
+      "docs": [
+        "What everyone at the table can see of a bidder while bids are sealed. Never an amount."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "raises",
+            "docs": [
+              "How many times the bidder has raised their sealed bid."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "locked",
+            "docs": [
+              "Locked in: this bidder is done, and cannot raise again."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "hinted",
+            "docs": [
+              "This bidder has been dealt their private clue."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "last_at",
+            "docs": [
+              "Seconds after the bidding clock started at which they last acted."
+            ],
+            "type": "u32"
           }
         ]
       }
@@ -4194,6 +4563,20 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "tells",
+            "docs": [
+              "One per slot, in line order: the public side of each bidder's sealed play. Empty on",
+              "units from before raising existed, and until the first move."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Tell"
+                }
+              }
+            }
           }
         ]
       }

@@ -12,10 +12,10 @@ export interface ChainUnit {
   bidCount: number;
   /**
    * `bid` is the amount, and only once the unit is closed. While bids are sealed the table sees
-   * `raises` (how many times this bidder raised), `locked` (they are done) and `lastAt` (when
-   * they last acted, in ms), and nothing about amounts.
+   * `raises` (how many times this bidder raised), `locked` (they are done), `hinted` (their
+   * private clue has been dealt) and `lastAt` (when they last acted, in ms), and nothing about amounts.
    */
-  bids: { who: string; house: boolean; deposit: number; hasBid: boolean; bid: number | null; raises: number; locked: boolean; lastAt: number | null }[];
+  bids: { who: string; house: boolean; deposit: number; hasBid: boolean; bid: number | null; raises: number; locked: boolean; hinted: boolean; lastAt: number | null }[];
   clues: { kind: number; arg: number }[];
   winner: string | null;
   winningBid: number;
@@ -93,6 +93,6 @@ export interface Pulse {
   stocked: boolean;
   closesAt: number;
   bidCount: number;
-  bids: { who: string; hasBid: boolean; raises: number; locked: boolean; lastAt: number | null }[];
+  bids: { who: string; hasBid: boolean; raises: number; locked: boolean; hinted: boolean; lastAt: number | null }[];
   readAt: number;
 }

@@ -76,7 +76,8 @@ function Line({ unit, me, now }: { unit: ChainUnit; me: string | null; now: numb
           </li>
         ))}
       </ul>
-      {sealed && unit.bids.some((b) => b.house) && <p className="mt-3 text-sm text-ink-2">House bidders play one fixed way: open at 70% of what the clues say the unit is worth to them, raise once to their limit after a player bids, and lock in when every player has, or with 12 seconds left.</p>}
+      {sealed && !unit.bids.some((b) => b.house) && <p className="mt-3 text-sm text-ink-2">Ties go to whoever reached the amount first, so a raise gives up your earlier place.</p>}
+      {sealed && unit.bids.some((b) => b.house) && <p className="mt-3 text-sm text-ink-2">House bidders play one fixed way, from the three clues on the door: they open below their limit and answer each move you make with one raise until they reach it, then lock in. One that locks in early has nothing left; one that keeps answering still has room. Ties go to whoever reached the amount first.</p>}
     </div>
   );
 }
@@ -150,6 +151,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
   const [from] = useState(() => p.moves.length);
   const acts = p.moves.slice(from);
   const [raiseTo, setRaiseTo] = useState<number | null>(null);
+  const [reading, setReading] = useState(false);
   const [amount, setAmount] = useState(0.4);
   const [shown, setShown] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -301,8 +303,17 @@ export function LiveStage({ unitId }: { unitId: number }) {
                     {found[i] ? <span className="rise text-[17px]">{c}</span> : <span className="text-ink-3">Hidden. Sweep the torch over the door.</span>}
                   </li>
                 ))}
+                {unit.status === "bidding" && mine && (
+                  <li className="flex min-h-[52px] items-center gap-4 border-b border-line py-3">
+                    <span className="label num text-accent-text">04</span>
+                    {p.hints[unit.id] ? <span className="rise text-[17px]">{clueText(p.hints[unit.id])}<span className="label ml-3 text-accent-text">Only you</span></span>
+                      : !mine.hinted ? <span className="text-ink-3">Your private clue is being dealt</span>
+                      : <button type="button" className="ulink ulink-on text-left text-[17px]" disabled={reading} onClick={() => { setReading(true); void p.readHint(unit.id).finally(() => setReading(false)); }}>{reading ? "Asking the private rollup" : "Your private clue. Read it"}</button>}
+                  </li>
+                )}
               </ol>
               {found.some((f) => !f) && <button type="button" onClick={() => setFound([true, true, true])} className="ulink ulink-on mt-3 text-sm text-ink-2">Turn the lights on and show all three</button>}
+              {unit.status === "bidding" && mine && <p className="mt-3 text-sm text-ink-2">Clue 04 is dealt to you alone inside the private rollup. The player next to you in line gets a different one.</p>}
             </div>
           )}
 
@@ -328,7 +339,7 @@ export function LiveStage({ unitId }: { unitId: number }) {
               <p className="label text-ink-3">{mine.locked ? "Your bid, locked in" : "Your sealed bid"}</p>
               <p className="display num mt-2 text-[72px] leading-none">{myBid !== null ? usd(myBid) : "Sealed"}</p>
               <span key={String(mine.locked)} className="stamp display absolute right-5 top-5 border-2 border-accent-text px-3 py-1 text-[22px] text-accent-text">{mine.locked ? "Locked" : "Sealed"}</span>
-              {acts.length > 0 && <p className="label num mt-3 text-accent-text">{acts.length} sealed {acts.length === 1 ? "move" : "moves"} · confirmed in {median} ms{acts.length === 1 ? "" : " (median)"} on MagicBlock's private rollup</p>}
+              {acts.length > 0 && <p className="label num mt-3 text-accent-text">{acts.length} sealed {acts.length === 1 ? "move" : "moves"} · confirmed in {median} ms{acts.length === 1 ? "" : " (median)"} on MagicBlock's private rollup{p.trip !== null ? `. One network trip from here to the rollup takes ${p.trip} ms, and a move needs two` : ""}</p>}
               {!mine.locked && left > 0 ? (
                 <>
                   <p className="mt-3 text-ink-2">Raise as often as you like. The table sees that you raised and when, never how much, so a one-cent raise looks the same as a big one.</p>

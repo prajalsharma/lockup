@@ -8,7 +8,7 @@
 //! | Layer | Instructions |
 //! |---|---|
 //! | Solana | `init_yard`, `add_item`, `create_unit`, `join_unit`, `start_unit` (locks the line and requests the VRF draw), `draw_callback`, `request_draw` (retry only), `delegate_unit`, `settle_bidder`, `settle_on_commit` (Magic Action), `claim_lot`, `reclaim_stalled`, `list_item`, `buy_item`, `cancel_listing`, `init_pool`, `consign`, `withdraw_consignment` |
-//! | Private rollup | `init_unit_permission`, `stock_unit`, `seal_manifest`, `place_bid`, `seal_bid`, `raise_bid`, `lock_in`, `close_unit`, `commit_unit`, `commit_and_settle` (commit plus a Magic Action per bidder that pays them on Solana) |
+//! | Private rollup | `init_unit_permission`, `stock_unit`, `seal_manifest`, `deal_hint`, `seal_hint`, `place_bid`, `seal_bid`, `raise_bid`, `lock_in`, `close_unit`, `commit_unit`, `commit_and_settle` (commit plus a Magic Action per bidder that pays them on Solana) |
 //!
 //! ## How the contents stay hidden and still can't be rigged
 //!
@@ -66,6 +66,7 @@ pub const UNIT_SEED: &[u8] = b"unit";
 pub const BIDDER_SEED: &[u8] = b"bidder";
 pub const BID_SEED: &[u8] = b"bid";
 pub const MANIFEST_SEED: &[u8] = b"manifest";
+pub const HINT_SEED: &[u8] = b"hint";
 pub const LISTING_SEED: &[u8] = b"listing";
 pub const STALL_SEED: &[u8] = b"stall";
 
@@ -412,6 +413,10 @@ pub mod lockup {
             value: stocked.value,
             salt,
             bump: ctx.bumps.manifest,
+            spare: [
+                Clue { kind: stocked.spare[0].kind, arg: stocked.spare[0].arg },
+                Clue { kind: stocked.spare[1].kind, arg: stocked.spare[1].arg },
+            ],
         };
         write_account(&ctx.accounts.manifest.to_account_info(), &manifest)?;
 
@@ -454,6 +459,54 @@ pub mod lockup {
         Ok(())
     }
 
+    /// Deal one bidder their private clue: a true statement about the unit that is not on the
+    /// door, taken from the sealed manifest. Bidders in even and odd places get different ones.
+    /// Send `seal_hint` in the same transaction so only that bidder can read it.
+    pub fn deal_hint(ctx: Context<DealHint>) -> Result<()> {
+        let unit = &ctx.accounts.unit;
+        require!(unit.status == UnitStatus::Bidding, LockupError::WrongStatus);
+        require!(unit.stocked, LockupError::NotStocked);
+        let who = ctx.accounts.bidder.key();
+        let index = unit.slot_index(&who).ok_or(LockupError::NotInLine)?;
+        require!(!unit.tell(index).hinted, LockupError::AlreadyHinted);
+
+        let unit_key = unit.key();
+        let clue = ctx.accounts.manifest.spare[index % 2];
+        ctx.accounts.create_ephemeral_hint((8 + Hint::INIT_SPACE) as u32)?;
+        let hint = Hint { unit: unit_key, bidder: who, clue, bump: ctx.bumps.hint };
+        write_account(&ctx.accounts.hint.to_account_info(), &hint)?;
+        ctx.accounts.unit.tell_mut(index).hinted = true;
+        // Deliberately logs nothing about the clue.
+        Ok(())
+    }
+
+    /// Make a private clue private: only its bidder can read it. Not even the operator.
+    pub fn seal_hint(ctx: Context<SealHint>) -> Result<()> {
+        if !ctx.accounts.permission.data_is_empty() {
+            return Ok(());
+        }
+        let bidder = ctx.accounts.hint.bidder;
+        let yard = ctx.accounts.unit.yard;
+        let id = ctx.accounts.unit.unit_id.to_le_bytes();
+        let unit_bump = [ctx.accounts.unit.bump];
+        let unit_signers: &[&[u8]] = &[UNIT_SEED, yard.as_ref(), &id, &unit_bump];
+        let unit_key = ctx.accounts.unit.key();
+        let hint_bump = [ctx.accounts.hint.bump];
+        let hint_signers: &[&[u8]] = &[HINT_SEED, unit_key.as_ref(), bidder.as_ref(), &hint_bump];
+
+        CreateEphemeralPermissionCpi {
+            payer: ctx.accounts.unit.to_account_info(),
+            permissioned_account: ctx.accounts.hint.to_account_info(),
+            permission: ctx.accounts.permission.to_account_info(),
+            vault: ctx.accounts.ephemeral_vault.to_account_info(),
+            magic_program: ctx.accounts.magic_program.to_account_info(),
+            permission_program: ctx.accounts.permission_program.to_account_info(),
+            args: EphemeralMembersArgs { is_private: true, members: vec![reader(bidder)] },
+        }
+        .invoke_signed(&[unit_signers, hint_signers])?;
+        Ok(())
+    }
+
     /// Place a bid. Send `seal_bid` in the same transaction.
     pub fn place_bid(ctx: Context<PlaceBid>, amount: u64) -> Result<()> {
         let unit = &ctx.accounts.unit;
@@ -477,7 +530,7 @@ pub mod lockup {
         let unit = &mut ctx.accounts.unit;
         let last_at = unit.seconds_in(Clock::get()?.unix_timestamp);
         unit.slots[index].has_bid = true;
-        unit.slots[index].set_tell(Tell { raises: 0, locked: false, last_at });
+        unit.tell_mut(index).last_at = last_at;
         unit.bid_count = unit.bid_count.checked_add(1).ok_or(LockupError::Overflow)?;
         // Deliberately does not log the amount.
         msg!("Bid {} sealed on unit {}", order, unit.unit_id);
@@ -495,22 +548,22 @@ pub mod lockup {
         let index = unit.slot_index(&ctx.accounts.bidder.key()).ok_or(LockupError::NotInLine)?;
         let slot = unit.slots[index];
         require!(slot.has_bid, LockupError::NoBidYet);
-        let mut tell = slot.tell();
-        require!(!tell.locked, LockupError::LockedIn);
+        require!(!unit.tell(index).locked, LockupError::LockedIn);
         require!(amount > ctx.accounts.bid.amount, LockupError::RaiseTooLow);
         require!(amount <= slot.deposit, LockupError::BidAboveDeposit);
 
         // A tie goes to whoever got to the amount first, so a raise gives up the earlier place.
-        let raised: u32 = unit.slots.iter().map(|s| if s.has_bid { s.tell().raises as u32 } else { 0 }).sum();
+        let raised: u32 = unit.tells.iter().map(|t| t.raises as u32).sum();
         let bid = &mut ctx.accounts.bid;
         bid.amount = amount;
         bid.order = (MAX_BIDDERS as u32 + raised).min(u8::MAX as u32) as u8;
 
+        let last_at = unit.seconds_in(now);
+        let tell = ctx.accounts.unit.tell_mut(index);
         tell.raises = tell.raises.saturating_add(1);
-        tell.last_at = unit.seconds_in(now);
-        ctx.accounts.unit.slots[index].set_tell(tell);
+        tell.last_at = last_at;
         // Deliberately does not log the amount.
-        msg!("Raise {} on unit {}", tell.raises, ctx.accounts.unit.unit_id);
+        msg!("Raise on unit {}", ctx.accounts.unit.unit_id);
         Ok(())
     }
 
@@ -523,11 +576,11 @@ pub mod lockup {
         require!(now < unit.closes_at, LockupError::BiddingClosed);
         let index = unit.slot_index(&ctx.accounts.bidder.key()).ok_or(LockupError::NotInLine)?;
         require!(unit.slots[index].has_bid, LockupError::NoBidYet);
-        let mut tell = unit.slots[index].tell();
-        require!(!tell.locked, LockupError::LockedIn);
+        require!(!unit.tell(index).locked, LockupError::LockedIn);
+        let last_at = unit.seconds_in(now);
+        let tell = unit.tell_mut(index);
         tell.locked = true;
-        tell.last_at = unit.seconds_in(now);
-        unit.slots[index].set_tell(tell);
+        tell.last_at = last_at;
         Ok(())
     }
 
@@ -1283,6 +1336,42 @@ pub struct PlaceBid<'info> {
     /// CHECK: created here as an ephemeral account.
     #[account(mut, eph, seeds = [BID_SEED, unit.key().as_ref(), bidder.key().as_ref()], bump)]
     pub bid: UncheckedAccount<'info>,
+}
+
+#[ephemeral_accounts]
+#[derive(Accounts)]
+pub struct DealHint<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(mut, sponsor, seeds = [UNIT_SEED, unit.yard.as_ref(), &unit.unit_id.to_le_bytes()], bump = unit.bump, has_one = authority @ LockupError::Unauthorized)]
+    pub unit: Box<Account<'info, Unit>>,
+    #[account(seeds = [MANIFEST_SEED, unit.key().as_ref()], bump = manifest.bump, constraint = manifest.unit == unit.key() @ LockupError::InvalidAccount)]
+    pub manifest: Box<Account<'info, Manifest>>,
+    /// CHECK: only its address is used; the instruction checks it is in this unit's line.
+    pub bidder: UncheckedAccount<'info>,
+    /// CHECK: created here as an ephemeral account.
+    #[account(mut, eph, seeds = [HINT_SEED, unit.key().as_ref(), bidder.key().as_ref()], bump)]
+    pub hint: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct SealHint<'info> {
+    #[account(mut, seeds = [UNIT_SEED, unit.yard.as_ref(), &unit.unit_id.to_le_bytes()], bump = unit.bump)]
+    pub unit: Box<Account<'info, Unit>>,
+    #[account(mut, seeds = [HINT_SEED, unit.key().as_ref(), hint.bidder.as_ref()], bump = hint.bump, constraint = hint.unit == unit.key() @ LockupError::InvalidAccount)]
+    pub hint: Box<Account<'info, Hint>>,
+    /// CHECK: permission PDA for the hint.
+    #[account(mut, seeds = [PERMISSION_SEED, hint.key().as_ref()], bump, seeds::program = PERMISSION_PROGRAM_ID)]
+    pub permission: UncheckedAccount<'info>,
+    /// CHECK: address-pinned.
+    #[account(address = PERMISSION_PROGRAM_ID)]
+    pub permission_program: UncheckedAccount<'info>,
+    /// CHECK: address-pinned.
+    #[account(mut, address = EPHEMERAL_VAULT_ID)]
+    pub ephemeral_vault: UncheckedAccount<'info>,
+    /// CHECK: address-pinned.
+    #[account(address = MAGIC_PROGRAM_ID)]
+    pub magic_program: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]

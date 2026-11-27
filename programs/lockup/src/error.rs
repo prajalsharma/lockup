@@ -82,4 +82,6 @@ pub enum LockupError {
     LockedIn,
     #[msg("Place a bid before you raise or lock in")]
     NoBidYet,
+    #[msg("This bidder already has their private clue")]
+    AlreadyHinted,
 }

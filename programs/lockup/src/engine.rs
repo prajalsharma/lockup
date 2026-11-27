@@ -44,6 +44,9 @@ pub struct Stocked {
     pub lots: Vec<EngineLot>,
     pub value: u32,
     pub clues: [EngineClue; 3],
+    /// Two more true statements that do not go on the door. They are dealt privately, one per
+    /// bidder, so players at the same table know different things.
+    pub spare: [EngineClue; 2],
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -143,7 +146,9 @@ pub fn stock(seed: &[u8; 32], catalog: &[ItemInfo]) -> Result<Stocked, EngineErr
         let j = rng.below(i as u64 + 1) as usize;
         pool.swap(i, j);
     }
-    Ok(Stocked { lots, value, clues: [pool[0], pool[1], pool[2]] })
+    // The pool always holds at least four statements; the fifth exists whenever any item has a group.
+    let spare = [pool[3], pool[(pool.len() - 1).min(4)]];
+    Ok(Stocked { lots, value, clues: [pool[0], pool[1], pool[2]], spare })
 }
 
 /// Highest bid wins. A tie goes to the bid placed first (lower `order`).
