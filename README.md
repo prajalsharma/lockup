@@ -13,7 +13,7 @@ trips to devnet, and the unit page shows both the figure for your own moves and 
 player's move is pushed to your screen over the rollup's websocket: about 0.8 seconds from their click in a
 two-browser test.
 
-- **Play:** https://lockup-seven.vercel.app
+- **Play:** https://playlockup.vercel.app (also at https://lockup-seven.vercel.app)
 - **Program (devnet):** [`2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR`](https://explorer.solana.com/address/2iCGfpC87DaSgdS62Fh2TaaEL7MnJeoA5vDBfdjoAAhR?cluster=devnet)
 - **How it works and what is trusted:** [`docs/CONTRACTS.md`](docs/CONTRACTS.md)
 
@@ -83,6 +83,22 @@ After a unit opens, the winner can keep the item tokens or sell them one at a ti
 less and returns it to the warehouse that future units are stocked from.
 
 ## Proof of integration
+
+### The round in the demo video (unit 87)
+
+A two-player round played on the live site on 27 Nov 2026, with raises, lock-ins and a private clue each. The bids, raises and clues are not on this list because they only ever existed inside the private rollup.
+
+| Step | What to look for | Link |
+|---|---|---|
+| Line locks, VRF requested | `start_unit` locks the line and calls MagicBlock VRF in the same instruction | [tx](https://explorer.solana.com/tx/5PsviPYXk3wdyYiNRE3o9nLmasLjrqGycyAPuPQW5ifYF9r9cSEt5fSNV4Z4wNUEH73EeSbrGKJ3zwhqW3VrfsLz?cluster=devnet) |
+| VRF callback | the VRF program calls `draw_callback` with the randomness | [tx](https://explorer.solana.com/tx/5dMVzqpuDrp2qvPFwV2SzZuJcWY6A7vSqS2A5ZdKcCMzALhsQqWGpXMV8XKBYfyHJV5M3US2mCiE7HNXRBfWj3zz?cluster=devnet) |
+| Delegation | `delegate_unit` hands the unit to the private rollup's validator | [tx](https://explorer.solana.com/tx/2JRT6btZLFCdmp94UaZaZycNoYXjjZQi2zfQTqyqaayipGT6bjMcfT4tsh6G6Y3KNg4WMTkV4kPy3DUgNGgkBubb?cluster=devnet) |
+| Commit and Magic Action | the delegation program returns the unit and runs `settle_on_commit` for both bidders in one transaction, with none from the operator | [tx](https://explorer.solana.com/tx/4XEHy6JvTPm7MxSkSU4k3in8NQYZxvYZ8cABkRCVSukA3JGPLMVTTXQhnKKYPggeSz69eCGD83PLjZD37HhfUzQr?cluster=devnet) |
+| Delivery | `claim_lot` sends a lot to the winner and releases its share of the bid | [tx](https://explorer.solana.com/tx/DbSeZuA7s2vpFmkrMDRB4BGBSCRAM9zHJ7G41RBZTfHmX8EMmoXHmYMvRXSUwwqfSF26AqDiyXy2C6BWNskmP6w?cluster=devnet) |
+| The unit | winner, both bids, contents and the published salt | [account](https://explorer.solana.com/address/GrK3wEXoQMKSJuCyGbMdX4oCMqpufSiho99tokPXh7PC?cluster=devnet) |
+
+### An earlier round (unit 9)
+
 
 Everything below is on Solana devnet and was produced by this program. The links are from one round
 (unit 9 of the live yard) run with `pnpm round`, plus a later four-player round on the live site. Unit 9
