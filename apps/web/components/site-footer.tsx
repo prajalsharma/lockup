@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { MAGICBLOCK, PROGRAM_ID, REPO_URL, explorer } from "@/lib/config";
-import { Wordmark } from "./site-header";
+import { MAGICBLOCK, PROGRAM_ID, REPO_URL, X_HANDLE, X_URL, explorer } from "@/lib/config";
+import { Wordmark, XLogo } from "./site-header";
 
 export function SiteFooter() {
   return (
@@ -9,6 +9,10 @@ export function SiteFooter() {
         <div>
           <Wordmark />
           <p className="mt-4 max-w-sm text-ink-2">Sealed-bid storage units on Solana. Built for Solana Blitz v10 on MagicBlock.</p>
+          <a className="mt-5 inline-flex items-center gap-2.5 text-ink transition-colors duration-200 hover:text-accent-text" href={X_URL} target="_blank" rel="noreferrer">
+            <XLogo size={16} />
+            <span className="ulink">Follow {X_HANDLE} on X</span>
+          </a>
           <p className="label mt-6 text-ink-3">Solana devnet. Nothing here is worth real money.</p>
         </div>
         <div>

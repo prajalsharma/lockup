@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { setSound, soundEnabled, sfx } from "@/lib/sound";
+import { X_HANDLE, X_URL } from "@/lib/config";
 import { ConnectButton } from "./wallet-ui";
 
 const LINKS = [
@@ -34,6 +35,15 @@ function IconButton({ label, pressed, onClick, children }: { label: string; pres
     >
       {children}
     </button>
+  );
+}
+
+/** The X mark. */
+export function XLogo({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+    </svg>
   );
 }
 
@@ -80,6 +90,12 @@ export function SiteHeader() {
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-2">
+          <a
+            href={X_URL} target="_blank" rel="noreferrer" aria-label={`Lockup on X, ${X_HANDLE}`} title={`Lockup on X, ${X_HANDLE}`}
+            className="hidden h-9 w-9 place-items-center rounded-lg border border-line text-ink-2 transition-colors duration-200 hover:border-line-2 hover:text-ink sm:grid"
+          >
+            <XLogo />
+          </a>
           <IconButton label={sound ? "Turn sound off" : "Turn sound on"} pressed={sound} onClick={flipSound}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
               <path d="M2 6h2.5L8 3v10L4.5 10H2z" fill="currentColor" stroke="none" />
